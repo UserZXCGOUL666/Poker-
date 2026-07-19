@@ -1,0 +1,123 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  PLAYER
+  ADMIN
+}
+
+enum TournamentStatus {
+  UPCOMING
+  ACTIVE
+  FINISHED
+  CANCELLED
+}
+
+enum PointTransactionType {
+  AWARD
+  DEDUCTION
+  CORRECTION
+}
+
+model User {
+  id                String             @id @default(cuid())
+  telegramId        BigInt             @unique
+  username          String?
+  firstName         String
+  lastName          String?
+  photoUrl          String?
+  role              UserRole           @default(PLAYER)
+  points            Int                @default(0)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  results           TournamentResult[]
+  pointTransactions PointTransaction[] @relation("PointRecipient")
+  pointChangesMade  PointTransaction[] @relation("PointAdmin")
+
+  @@index([points, createdAt])
+}
+
+model Season {
+  id                String             @id @default(cuid())
+  name              String
+  number            Int
+  startsAt          DateTime
+  endsAt            DateTime
+  isActive          Boolean            @default(false)
+  createdAt         DateTime           @default(now())
+  tournaments       Tournament[]
+  pointTransactions PointTransaction[]
+
+  @@index([isActive, startsAt])
+}
+
+model Tournament {
+  id               String             @id @default(cuid())
+  seasonId         String
+  title            String
+  description      String?
+  startsAt         DateTime
+  location         String?
+  capacity         Int                @default(48)
+  participantCount Int                @default(0)
+  status           TournamentStatus   @default(UPCOMING)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  season           Season             @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  results          TournamentResult[]
+  notifications    NotificationLog[]
+
+  @@index([seasonId, startsAt])
+  @@index([status, startsAt])
+}
+
+model TournamentResult {
+  id           String     @id @default(cuid())
+  tournamentId String
+  userId       String
+  place        Int
+  points       Int        @default(0)
+  isFinalTable Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tournamentId, userId])
+  @@unique([tournamentId, place])
+  @@index([userId, createdAt])
+}
+
+model NotificationLog {
+  id           String     @id @default(cuid())
+  tournamentId String
+  sentCount    Int
+  failedCount  Int
+  createdAt    DateTime   @default(now())
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+}
+
+model PointTransaction {
+  id             String               @id @default(cuid())
+  userId         String
+  seasonId       String
+  createdById    String
+  type           PointTransactionType
+  amount         Int
+  balanceAfter   Int
+  reason         String
+  idempotencyKey String?              @unique
+  createdAt      DateTime             @default(now())
+  user           User                 @relation("PointRecipient", fields: [userId], references: [id], onDelete: Restrict)
+  createdBy      User                 @relation("PointAdmin", fields: [createdById], references: [id], onDelete: Restrict)
+  season         Season               @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+
+  @@index([userId, seasonId, createdAt])
+  @@index([seasonId, createdAt])
+  @@index([createdById, createdAt])
+}
