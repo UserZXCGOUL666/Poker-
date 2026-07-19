@@ -1,5 +1,8 @@
 export type Role = 'PLAYER' | 'ADMIN';
 export type TournamentStatus = 'UPCOMING' | 'ACTIVE' | 'FINISHED' | 'CANCELLED';
+export type TournamentRegistrationStatus = 'REGISTERED' | 'WAITLISTED' | 'CHECKED_IN' | 'PLAYED' | 'CANCELLED';
+
+export type PlayerTag = { id: string; name: string; color: string };
 
 export type User = {
   id: string;
@@ -21,7 +24,10 @@ export type Season = {
   startsAt: string;
   endsAt: string;
   isActive: boolean;
-  _count?: { tournaments: number };
+  finalizedAt?: string | null;
+  finalizedById?: string | null;
+  standings?: { rank: number; points: number; user: Pick<User, 'id' | 'firstName' | 'lastName' | 'username'> }[];
+  _count?: { tournaments: number; standings?: number };
 };
 
 export type Tournament = {
@@ -34,8 +40,11 @@ export type Tournament = {
   capacity: number;
   participantCount: number;
   status: TournamentStatus;
+  registrationClosed: boolean;
+  registrationDeadline: string | null;
+  registration?: { id: string; status: TournamentRegistrationStatus; waitlistPosition: number | null } | null;
   season?: { name: string };
-  _count?: { results: number; notifications?: number };
+  _count?: { results: number; notifications?: number; registrations?: number };
 };
 
 export type PointTransaction = {
@@ -50,7 +59,11 @@ export type PointTransaction = {
   createdAt: string;
   user?: Pick<User, 'id' | 'firstName' | 'lastName' | 'username' | 'points'>;
   createdBy: Pick<User, 'id' | 'firstName' | 'lastName'>;
-  season: Pick<Season, 'id' | 'name'>;
+  season: Pick<Season, 'id' | 'name' | 'isActive' | 'finalizedAt'>;
+  reversalOfId?: string | null;
+  reversedBy?: { id: string; createdAt: string } | null;
+  reversalOf?: { id: string; amount: number; reason: string } | null;
+  batch?: { id: string; tournament: { id: string; title: string } | null } | null;
 };
 
 export type HomeData = {

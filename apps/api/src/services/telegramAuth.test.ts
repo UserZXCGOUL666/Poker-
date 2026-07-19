@@ -24,4 +24,14 @@ describe('validateTelegramInitData', () => {
     const params = new URLSearchParams({ auth_date: String(Math.floor(Date.now() / 1000)), user: '{"id":42}', hash: '00'.repeat(32) });
     expect(() => validateTelegramInitData(params.toString(), 'token')).toThrow();
   });
+
+  it('отклоняет корректно подписанные данные с датой из будущего', () => {
+    const token = '123:test-token';
+    const params = new URLSearchParams({
+      auth_date: String(Math.floor(Date.now() / 1000) + 600),
+      user: JSON.stringify({ id: 42, first_name: 'Test' })
+    });
+    params.set('hash', sign(params, token));
+    expect(() => validateTelegramInitData(params.toString(), token)).toThrow('устарели');
+  });
 });

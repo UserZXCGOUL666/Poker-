@@ -11,6 +11,7 @@ import { prisma } from './db.js';
 import { adminRouter } from './routes/admin.js';
 import { authRouter } from './routes/auth.js';
 import { publicRouter } from './routes/public.js';
+import { generateRecurringTournaments } from './services/recurringTournaments.js';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -78,7 +79,13 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 const server = app.listen(env.PORT, async () => {
   console.log(`Poker Club API запущен на порту ${env.PORT}`);
   try { await configureWebhook(); } catch (error) { console.error('Не удалось настроить webhook', error); }
+  try { await generateRecurringTournaments(); } catch (error) { console.error('Не удалось создать повторяющиеся турниры', error); }
 });
+
+const recurringTimer = setInterval(() => {
+  void generateRecurringTournaments().catch((error) => console.error('Не удалось обновить повторяющиеся турниры', error));
+}, 6 * 60 * 60 * 1000);
+recurringTimer.unref();
 
 async function shutdown() {
   await new Promise<void>((resolve) => server.close(() => resolve()));

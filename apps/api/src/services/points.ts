@@ -1,6 +1,7 @@
 import { PointTransactionType, Prisma } from '@prisma/client';
 import { prisma } from '../db.js';
 import { AppError } from '../errors.js';
+import { writeAudit } from './audit.js';
 
 type PointChangeInput = {
   userId: string;
@@ -26,7 +27,7 @@ export async function applyManualPointChange(input: PointChangeInput) {
           const existing = await tx.pointTransaction.findUnique({
             where: { idempotencyKey: input.idempotencyKey },
             include: {
-              user: { select: { id: true, firstName: true, lastName: true, username: true, points: true } },
+              user: { select: { id: true, telegramId: true, firstName: true, lastName: true, username: true, points: true } },
               createdBy: { select: { id: true, firstName: true, lastName: true } },
               season: { select: { id: true, name: true } }
             }
@@ -35,7 +36,7 @@ export async function applyManualPointChange(input: PointChangeInput) {
         }
 
         const [season, user] = await Promise.all([
-          tx.season.findFirst({ where: { isActive: true }, select: { id: true, name: true } }),
+          tx.season.findFirst({ where: { isActive: true, finalizedAt: null }, select: { id: true, name: true } }),
           tx.user.findUnique({ where: { id: input.userId }, select: { id: true, points: true } })
         ]);
         if (!season) throw new AppError('Сначала создайте активный сезон', 409, 'NO_ACTIVE_SEASON');
@@ -46,7 +47,7 @@ export async function applyManualPointChange(input: PointChangeInput) {
         const updatedUser = await tx.user.update({
           where: { id: user.id },
           data: { points: { increment: input.amount } },
-          select: { id: true, firstName: true, lastName: true, username: true, points: true }
+          select: { id: true, telegramId: true, firstName: true, lastName: true, username: true, points: true }
         });
         const transaction = await tx.pointTransaction.create({
           data: {
@@ -60,10 +61,18 @@ export async function applyManualPointChange(input: PointChangeInput) {
             idempotencyKey: input.idempotencyKey
           },
           include: {
-            user: { select: { id: true, firstName: true, lastName: true, username: true, points: true } },
+            user: { select: { id: true, telegramId: true, firstName: true, lastName: true, username: true, points: true } },
             createdBy: { select: { id: true, firstName: true, lastName: true } },
             season: { select: { id: true, name: true } }
           }
+        });
+        await writeAudit(tx, {
+          actorId: input.adminId,
+          action: input.amount > 0 ? 'POINTS_AWARDED' : 'POINTS_DEDUCTED',
+          entityType: 'PointTransaction',
+          entityId: transaction.id,
+          summary: `${input.amount > 0 ? 'Начислено' : 'Списано'} ${Math.abs(input.amount)} PTS: ${updatedUser.firstName}`,
+          after: { userId: user.id, amount: input.amount, balanceAfter: updatedUser.points, reason: input.reason }
         });
         return { transaction, user: updatedUser, duplicate: false };
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
@@ -72,7 +81,7 @@ export async function applyManualPointChange(input: PointChangeInput) {
         const existing = await prisma.pointTransaction.findUnique({
           where: { idempotencyKey: input.idempotencyKey },
           include: {
-            user: { select: { id: true, firstName: true, lastName: true, username: true, points: true } },
+            user: { select: { id: true, telegramId: true, firstName: true, lastName: true, username: true, points: true } },
             createdBy: { select: { id: true, firstName: true, lastName: true } },
             season: { select: { id: true, name: true } }
           }

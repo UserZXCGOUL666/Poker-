@@ -32,7 +32,8 @@ export function validateTelegramInitData(
   }
 
   const authDate = Number(params.get('auth_date'));
-  if (!authDate || Date.now() / 1000 - authDate > maxAgeSeconds) {
+  const ageSeconds = Date.now() / 1000 - authDate;
+  if (!authDate || ageSeconds > maxAgeSeconds || ageSeconds < -60) {
     throw new Error('Данные Telegram устарели');
   }
 

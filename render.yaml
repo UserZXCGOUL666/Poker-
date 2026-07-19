@@ -26,6 +26,8 @@ services:
         sync: false
       - key: ADMIN_TELEGRAM_IDS
         sync: false
+      - key: CLUB_TIMEZONE
+        value: Europe/Moscow
 
 databases:
   - name: poker-club-db

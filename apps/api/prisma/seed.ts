@@ -1,4 +1,4 @@
-import { PointTransactionType, PrismaClient, TournamentStatus, UserRole } from '@prisma/client';
+import { PointTransactionType, PrismaClient, ReasonPresetKind, TournamentRegistrationStatus, TournamentStatus, UserRole } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -14,12 +14,20 @@ const players = [
 ] as const;
 
 async function main() {
+  await prisma.seasonStanding.deleteMany();
+  await prisma.auditLog.deleteMany();
+  await prisma.userTag.deleteMany();
+  await prisma.playerTag.deleteMany();
+  await prisma.tournamentRegistration.deleteMany();
   await prisma.browserSession.deleteMany();
   await prisma.browserAccessInvite.deleteMany();
   await prisma.pointTransaction.deleteMany();
+  await prisma.pointBatch.deleteMany();
   await prisma.notificationLog.deleteMany();
   await prisma.tournamentResult.deleteMany();
   await prisma.tournament.deleteMany();
+  await prisma.tournamentTemplate.deleteMany();
+  await prisma.reasonPreset.deleteMany();
   await prisma.season.deleteMany();
   await prisma.user.deleteMany();
 
@@ -29,6 +37,19 @@ async function main() {
       data: { telegramId, firstName, lastName, username, role }
     }));
   }
+
+  await prisma.reasonPreset.createMany({
+    data: [
+      { id: 'reason-participation', label: 'Участие', reason: 'Участие в турнире', kind: ReasonPresetKind.AWARD, sortOrder: 10 },
+      { id: 'reason-podium', label: 'Призовое место', reason: 'Призовое место', kind: ReasonPresetKind.AWARD, sortOrder: 20 },
+      { id: 'reason-bonus', label: 'Бонус', reason: 'Бонус клуба', kind: ReasonPresetKind.AWARD, sortOrder: 30 },
+      { id: 'reason-correction', label: 'Корректировка', reason: 'Корректировка результата', kind: ReasonPresetKind.BOTH, sortOrder: 40 },
+      { id: 'reason-violation', label: 'Нарушение', reason: 'Нарушение регламента', kind: ReasonPresetKind.DEDUCTION, sortOrder: 50 }
+    ]
+  });
+  const vipTag = await prisma.playerTag.create({ data: { name: 'VIP', color: '#f2b84b' } });
+  const organizerTag = await prisma.playerTag.create({ data: { name: 'Организатор', color: '#46d98b' } });
+  await prisma.userTag.createMany({ data: [{ userId: users[0].id, tagId: organizerTag.id }, { userId: users[1].id, tagId: vipTag.id }] });
 
   const now = new Date();
   const seasonStart = new Date(now);
@@ -97,7 +118,7 @@ async function main() {
   const nextFriday = new Date(now);
   nextFriday.setDate(now.getDate() + ((5 - now.getDay() + 7) % 7 || 7));
   nextFriday.setHours(20, 0, 0, 0);
-  await prisma.tournament.create({
+  const upcoming = await prisma.tournament.create({
     data: {
       seasonId: season.id,
       title: 'Пятничный турнир',
@@ -109,6 +130,11 @@ async function main() {
       status: TournamentStatus.UPCOMING
     }
   });
+
+  await prisma.tournamentRegistration.createMany({
+    data: users.slice(0, 5).map((user) => ({ tournamentId: upcoming.id, userId: user.id, status: TournamentRegistrationStatus.REGISTERED }))
+  });
+  await prisma.tournament.update({ where: { id: upcoming.id }, data: { participantCount: 5 } });
 
   for (const [userId, total] of balances) {
     await prisma.user.update({ where: { id: userId }, data: { points: total } });

@@ -25,23 +25,44 @@ enum PointTransactionType {
   CORRECTION
 }
 
+enum TournamentRegistrationStatus {
+  REGISTERED
+  WAITLISTED
+  CHECKED_IN
+  PLAYED
+  CANCELLED
+}
+
+enum ReasonPresetKind {
+  AWARD
+  DEDUCTION
+  BOTH
+}
+
 model User {
-  id                    String                @id @default(cuid())
-  telegramId            BigInt                @unique
+  id                    String                   @id @default(cuid())
+  telegramId            BigInt                   @unique
   username              String?
   firstName             String
   lastName              String?
   photoUrl              String?
-  role                  UserRole              @default(PLAYER)
-  points                Int                   @default(0)
-  createdAt             DateTime              @default(now())
-  updatedAt             DateTime              @updatedAt
+  role                  UserRole                 @default(PLAYER)
+  points                Int                      @default(0)
+  adminNote             String?
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
   results               TournamentResult[]
-  pointTransactions     PointTransaction[]    @relation("PointRecipient")
-  pointChangesMade      PointTransaction[]    @relation("PointAdmin")
-  browserInvites        BrowserAccessInvite[] @relation("BrowserInviteRecipient")
-  browserInvitesCreated BrowserAccessInvite[] @relation("BrowserInviteAdmin")
+  pointTransactions     PointTransaction[]       @relation("PointRecipient")
+  pointChangesMade      PointTransaction[]       @relation("PointAdmin")
+  browserInvites        BrowserAccessInvite[]    @relation("BrowserInviteRecipient")
+  browserInvitesCreated BrowserAccessInvite[]    @relation("BrowserInviteAdmin")
   browserSessions       BrowserSession[]
+  registrations         TournamentRegistration[]
+  tags                  UserTag[]
+  auditLogs             AuditLog[]               @relation("AuditActor")
+  pointBatchesCreated   PointBatch[]             @relation("PointBatchAdmin")
+  finalizedSeasons      Season[]                 @relation("SeasonFinalizedBy")
+  seasonStandings       SeasonStanding[]
 
   @@index([points, createdAt])
 }
@@ -80,31 +101,43 @@ model Season {
   startsAt          DateTime
   endsAt            DateTime
   isActive          Boolean            @default(false)
+  finalizedAt       DateTime?
+  finalizedById     String?
   createdAt         DateTime           @default(now())
   tournaments       Tournament[]
   pointTransactions PointTransaction[]
+  standings         SeasonStanding[]
+  finalizedBy       User?              @relation("SeasonFinalizedBy", fields: [finalizedById], references: [id], onDelete: SetNull)
 
   @@index([isActive, startsAt])
 }
 
 model Tournament {
-  id               String             @id @default(cuid())
-  seasonId         String
-  title            String
-  description      String?
-  startsAt         DateTime
-  location         String?
-  capacity         Int                @default(48)
-  participantCount Int                @default(0)
-  status           TournamentStatus   @default(UPCOMING)
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
-  season           Season             @relation(fields: [seasonId], references: [id], onDelete: Cascade)
-  results          TournamentResult[]
-  notifications    NotificationLog[]
+  id                   String                   @id @default(cuid())
+  seasonId             String
+  title                String
+  description          String?
+  startsAt             DateTime
+  location             String?
+  capacity             Int                      @default(48)
+  participantCount     Int                      @default(0)
+  status               TournamentStatus         @default(UPCOMING)
+  registrationClosed   Boolean                  @default(false)
+  registrationDeadline DateTime?
+  templateId           String?
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  season               Season                   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  results              TournamentResult[]
+  notifications        NotificationLog[]
+  registrations        TournamentRegistration[]
+  pointBatches         PointBatch[]
+  template             TournamentTemplate?      @relation(fields: [templateId], references: [id], onDelete: SetNull)
 
+  @@unique([templateId, startsAt])
   @@index([seasonId, startsAt])
   @@index([status, startsAt])
+  @@index([templateId, startsAt])
 }
 
 model TournamentResult {
@@ -142,12 +175,134 @@ model PointTransaction {
   balanceAfter   Int
   reason         String
   idempotencyKey String?              @unique
+  batchId        String?
+  reversalOfId   String?              @unique
   createdAt      DateTime             @default(now())
   user           User                 @relation("PointRecipient", fields: [userId], references: [id], onDelete: Restrict)
   createdBy      User                 @relation("PointAdmin", fields: [createdById], references: [id], onDelete: Restrict)
   season         Season               @relation(fields: [seasonId], references: [id], onDelete: Restrict)
+  batch          PointBatch?          @relation(fields: [batchId], references: [id], onDelete: SetNull)
+  reversalOf     PointTransaction?    @relation("TransactionReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversedBy     PointTransaction?    @relation("TransactionReversal")
 
   @@index([userId, seasonId, createdAt])
   @@index([seasonId, createdAt])
   @@index([createdById, createdAt])
+  @@index([batchId, createdAt])
+}
+
+model PointBatch {
+  id             String             @id @default(cuid())
+  tournamentId   String?            @unique
+  createdById    String
+  idempotencyKey String             @unique
+  note           String?
+  createdAt      DateTime           @default(now())
+  tournament     Tournament?        @relation(fields: [tournamentId], references: [id], onDelete: SetNull)
+  createdBy      User               @relation("PointBatchAdmin", fields: [createdById], references: [id], onDelete: Restrict)
+  transactions   PointTransaction[]
+
+  @@index([createdById, createdAt])
+}
+
+model TournamentRegistration {
+  id           String                       @id @default(cuid())
+  tournamentId String
+  userId       String
+  status       TournamentRegistrationStatus @default(REGISTERED)
+  createdAt    DateTime                     @default(now())
+  updatedAt    DateTime                     @updatedAt
+  promotedAt   DateTime?
+  checkedInAt  DateTime?
+  cancelledAt  DateTime?
+  tournament   Tournament                   @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  user         User                         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tournamentId, userId])
+  @@index([tournamentId, status, createdAt])
+  @@index([userId, createdAt])
+}
+
+model TournamentTemplate {
+  id                String       @id @default(cuid())
+  name              String
+  title             String
+  description       String?
+  location          String?
+  capacity          Int          @default(48)
+  recurrenceEnabled Boolean      @default(false)
+  nextStartsAt      DateTime?
+  weeksAhead        Int          @default(4)
+  isActive          Boolean      @default(true)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  tournaments       Tournament[]
+
+  @@index([recurrenceEnabled, isActive, nextStartsAt])
+}
+
+model ReasonPreset {
+  id            String           @id @default(cuid())
+  label         String
+  reason        String
+  kind          ReasonPresetKind @default(BOTH)
+  defaultAmount Int?
+  sortOrder     Int              @default(0)
+  isActive      Boolean          @default(true)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@index([isActive, sortOrder])
+}
+
+model PlayerTag {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  color     String    @default("#3b8cff")
+  createdAt DateTime  @default(now())
+  users     UserTag[]
+}
+
+model UserTag {
+  userId String
+  tagId  String
+  user   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tag    PlayerTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([userId, tagId])
+  @@index([tagId, userId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String
+  entityType String
+  entityId   String?
+  summary    String
+  before     Json?
+  after      Json?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  actor      User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+  @@index([entityType, entityId, createdAt])
+  @@index([action, createdAt])
+}
+
+model SeasonStanding {
+  id        String   @id @default(cuid())
+  seasonId  String
+  userId    String
+  rank      Int
+  points    Int
+  createdAt DateTime @default(now())
+  season    Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@unique([seasonId, userId])
+  @@unique([seasonId, rank])
+  @@index([userId, createdAt])
 }

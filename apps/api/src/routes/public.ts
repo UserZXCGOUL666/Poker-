@@ -1,6 +1,9 @@
 import { Router } from 'express';
+import { TournamentRegistrationStatus } from '@prisma/client';
 import { prisma } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
+import { cancelTournamentRegistration, registerForTournament } from '../services/registrations.js';
+import { notifyUser, registrationNotification } from '../bot.js';
 
 export const publicRouter = Router();
 publicRouter.use(requireAuth);
@@ -33,12 +36,53 @@ publicRouter.get('/home', async (req, res) => {
   });
 });
 
-publicRouter.get('/tournaments', async (_req, res) => {
+publicRouter.get('/tournaments', async (req, res) => {
   const tournaments = await prisma.tournament.findMany({
-    include: { season: { select: { name: true } }, _count: { select: { results: true } } },
+    include: {
+      season: { select: { name: true } },
+      registrations: { where: { userId: req.auth!.userId }, take: 1 },
+      _count: { select: { results: true, registrations: { where: { status: { in: [TournamentRegistrationStatus.REGISTERED, TournamentRegistrationStatus.CHECKED_IN, TournamentRegistrationStatus.PLAYED] } } } } }
+    },
     orderBy: { startsAt: 'desc' }
   });
-  return res.json(tournaments);
+  const waitlisted = await prisma.tournamentRegistration.findMany({
+    where: { tournamentId: { in: tournaments.map((item) => item.id) }, status: TournamentRegistrationStatus.WAITLISTED },
+    orderBy: [{ tournamentId: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+    select: { id: true, tournamentId: true, userId: true }
+  });
+  const waitlistPosition = new Map<string, number>();
+  const counters = new Map<string, number>();
+  for (const entry of waitlisted) {
+    const position = (counters.get(entry.tournamentId) ?? 0) + 1;
+    counters.set(entry.tournamentId, position);
+    if (entry.userId === req.auth!.userId) waitlistPosition.set(entry.id, position);
+  }
+  return res.json(tournaments.map(({ registrations, ...tournament }) => ({
+    ...tournament,
+    participantCount: tournament._count.registrations,
+    registration: registrations[0] ? { ...registrations[0], waitlistPosition: waitlistPosition.get(registrations[0].id) ?? null } : null
+  })));
+});
+
+publicRouter.post('/tournaments/:id/registration', async (req, res, next) => {
+  try {
+    const result = await registerForTournament(req.params.id, req.auth!.userId, { actorId: req.auth!.userId, actorIsAdmin: false });
+    const notification = result.duplicate ? null : await notifyUser(result.user.telegramId, registrationNotification(result.tournament.title, result.tournament.startsAt, result.registration.status === TournamentRegistrationStatus.WAITLISTED ? 'WAITLISTED' : 'REGISTERED'));
+    return res.status(result.duplicate ? 200 : 201).json({ registration: result.registration, notification });
+  } catch (error) { return next(error); }
+});
+
+publicRouter.delete('/tournaments/:id/registration', async (req, res, next) => {
+  try {
+    const registration = await prisma.tournamentRegistration.findUnique({ where: { tournamentId_userId: { tournamentId: req.params.id, userId: req.auth!.userId } } });
+    if (!registration) return res.status(404).json({ message: 'Вы не записаны на этот турнир' });
+    const result = await cancelTournamentRegistration(registration.id, { actorId: req.auth!.userId, actorIsAdmin: false, requestedByUserId: req.auth!.userId });
+    const notification = result.duplicate ? null : await notifyUser(result.user.telegramId, registrationNotification(result.tournament.title, result.tournament.startsAt, 'CANCELLED'));
+    const promotionNotification = result.promoted
+      ? await notifyUser(result.promoted.user.telegramId, registrationNotification(result.tournament.title, result.tournament.startsAt, 'PROMOTED'))
+      : null;
+    return res.json({ registration: result.registration, notification, promotionNotification });
+  } catch (error) { return next(error); }
 });
 
 publicRouter.get('/leaderboard', async (req, res) => {

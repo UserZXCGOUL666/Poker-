@@ -12,7 +12,19 @@ const schema = z.object({
   PUBLIC_API_URL: z.string().url().optional(),
   RENDER_EXTERNAL_HOSTNAME: z.string().optional(),
   ADMIN_TELEGRAM_IDS: z.string().default(''),
+  CLUB_TIMEZONE: z.string().default('Europe/Moscow'),
   ALLOW_DEV_AUTH: z.enum(['true', 'false']).default('false').transform((value) => value === 'true')
+}).superRefine((value, ctx) => {
+  if (value.NODE_ENV !== 'production') return;
+  if (value.JWT_SECRET === 'dev-only-secret-change-me') {
+    ctx.addIssue({ code: 'custom', path: ['JWT_SECRET'], message: 'В production задайте случайный JWT_SECRET' });
+  }
+  if (!value.MINI_APP_URL.startsWith('https://')) {
+    ctx.addIssue({ code: 'custom', path: ['MINI_APP_URL'], message: 'Production Mini App должна использовать HTTPS' });
+  }
+  if (value.TELEGRAM_BOT_TOKEN && !value.TELEGRAM_WEBHOOK_SECRET) {
+    ctx.addIssue({ code: 'custom', path: ['TELEGRAM_WEBHOOK_SECRET'], message: 'Для production webhook нужен секрет' });
+  }
 });
 
 export const env = schema.parse(process.env);
