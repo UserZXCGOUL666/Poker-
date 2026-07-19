@@ -28,13 +28,38 @@ export function AuthProvider({ children }: PropsWithChildren) {
         const telegram = window.Telegram?.WebApp;
         telegram?.ready();
         telegram?.expand();
+        const browserInvite = window.location.pathname === '/browser-login'
+          ? new URLSearchParams(window.location.search).get('token')
+          : null;
+        if (browserInvite) {
+          window.history.replaceState({}, '', '/browser-login');
+          localStorage.removeItem('poker-club-token');
+          localStorage.removeItem('poker-club-auth-method');
+          const result = await post<{ token: string; user: User; expiresAt: string }>('/auth/browser/exchange', { token: browserInvite });
+          localStorage.setItem('poker-club-token', result.token);
+          localStorage.setItem('poker-club-auth-method', 'browser');
+          window.history.replaceState({}, '', '/');
+          if (active) setUser(result.user);
+          return;
+        }
+        if (window.location.pathname === '/browser-login') {
+          throw new Error('В ссылке отсутствует код доступа. Запросите новое приглашение у администратора.');
+        }
+
         const existing = localStorage.getItem('poker-club-token');
         if (existing) {
           try {
             const me = await api<User>('/auth/me');
             if (active) setUser(me);
             return;
-          } catch { localStorage.removeItem('poker-club-token'); }
+          } catch {
+            const wasBrowserSession = localStorage.getItem('poker-club-auth-method') === 'browser';
+            localStorage.removeItem('poker-club-token');
+            localStorage.removeItem('poker-club-auth-method');
+            if (wasBrowserSession && !telegram?.initData) {
+              throw new Error('Браузерная сессия истекла или была отозвана. Запросите новую ссылку у администратора.');
+            }
+          }
         }
 
         const devId = import.meta.env.VITE_DEV_TELEGRAM_ID;
@@ -45,6 +70,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
             : { initData: '' };
         const result = await post<{ token: string; user: User }>('/auth/telegram', payload);
         localStorage.setItem('poker-club-token', result.token);
+        localStorage.setItem('poker-club-auth-method', 'telegram');
         if (active) setUser(result.user);
       } catch (cause) {
         if (active) setError(cause instanceof Error ? cause.message : 'Не удалось войти через Telegram');

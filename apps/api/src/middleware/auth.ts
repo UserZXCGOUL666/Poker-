@@ -1,22 +1,43 @@
 import type { NextFunction, Request, Response } from 'express';
-import jwt from 'jsonwebtoken';
+import jwt, { type SignOptions } from 'jsonwebtoken';
 import { adminTelegramIds, env } from '../config.js';
+import { prisma } from '../db.js';
 
-type TokenPayload = { sub: string; telegramId: string; role: 'PLAYER' | 'ADMIN' };
+type TokenPayload = {
+  sub: string;
+  telegramId: string;
+  role: 'PLAYER' | 'ADMIN';
+  authMethod?: 'telegram' | 'browser';
+  sessionId?: string;
+};
 
-export function createAccessToken(payload: TokenPayload) {
-  return jwt.sign(payload, env.JWT_SECRET, { expiresIn: '7d' });
+export function createAccessToken(payload: TokenPayload, expiresIn: SignOptions['expiresIn'] = '7d') {
+  return jwt.sign(payload, env.JWT_SECRET, { expiresIn });
 }
 
-export function requireAuth(req: Request, res: Response, next: NextFunction) {
+export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');
   if (!token) return res.status(401).json({ message: 'Требуется авторизация через Telegram' });
   try {
     const payload = jwt.verify(token, env.JWT_SECRET) as TokenPayload;
-    req.auth = { userId: payload.sub, telegramId: payload.telegramId, role: payload.role };
+    if (payload.authMethod === 'browser') {
+      if (!payload.sessionId) return res.status(401).json({ message: 'Браузерная сессия недействительна' });
+      const session = await prisma.browserSession.findFirst({
+        where: { id: payload.sessionId, userId: payload.sub, revokedAt: null, expiresAt: { gt: new Date() } },
+        select: { id: true }
+      });
+      if (!session) return res.status(401).json({ message: 'Браузерный доступ отозван или истёк' });
+    }
+    req.auth = {
+      userId: payload.sub,
+      telegramId: payload.telegramId,
+      role: payload.role,
+      method: payload.authMethod ?? 'telegram',
+      sessionId: payload.sessionId
+    };
     return next();
   } catch {
-    return res.status(401).json({ message: 'Сессия истекла. Откройте Mini App заново.' });
+    return res.status(401).json({ message: 'Сессия истекла. Войдите повторно.' });
   }
 }
 

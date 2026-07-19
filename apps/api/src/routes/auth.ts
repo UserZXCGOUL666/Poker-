@@ -3,7 +3,9 @@ import { UserRole } from '@prisma/client';
 import { z } from 'zod';
 import { adminTelegramIds, env } from '../config.js';
 import { prisma } from '../db.js';
+import { AppError } from '../errors.js';
 import { createAccessToken, requireAuth } from '../middleware/auth.js';
+import { browserSessionExpiresAt, hashBrowserInviteToken } from '../services/browserAccess.js';
 import { validateTelegramInitData, type TelegramUserData } from '../services/telegramAuth.js';
 
 export const authRouter = Router();
@@ -52,8 +54,52 @@ authRouter.post('/telegram', async (req, res, next) => {
       }
     });
 
-    const token = createAccessToken({ sub: user.id, telegramId, role: user.role });
+    const token = createAccessToken({ sub: user.id, telegramId, role: user.role, authMethod: 'telegram' });
     return res.json({ token, user: serializeUser(user) });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+const browserExchangeSchema = z.object({ token: z.string().min(40).max(256) });
+
+authRouter.post('/browser/exchange', async (req, res, next) => {
+  try {
+    const { token } = browserExchangeSchema.parse(req.body);
+    const now = new Date();
+    const tokenHash = hashBrowserInviteToken(token);
+    const result = await prisma.$transaction(async (tx) => {
+      const invite = await tx.browserAccessInvite.findFirst({
+        where: { tokenHash, usedAt: null, expiresAt: { gt: now } },
+        include: { user: true }
+      });
+      if (!invite) throw new AppError('Ссылка недействительна, уже использована или истекла', 401, 'INVALID_BROWSER_INVITE');
+
+      const claimed = await tx.browserAccessInvite.updateMany({
+        where: { id: invite.id, usedAt: null, expiresAt: { gt: now } },
+        data: { usedAt: now }
+      });
+      if (claimed.count !== 1) throw new AppError('Ссылка уже использована', 401, 'USED_BROWSER_INVITE');
+
+      const session = await tx.browserSession.create({
+        data: { userId: invite.userId, expiresAt: browserSessionExpiresAt(now) }
+      });
+      return { user: invite.user, session };
+    });
+
+    const telegramId = result.user.telegramId.toString();
+    const role = adminTelegramIds.has(telegramId) ? UserRole.ADMIN : UserRole.PLAYER;
+    const user = result.user.role === role
+      ? result.user
+      : await prisma.user.update({ where: { id: result.user.id }, data: { role } });
+    const accessToken = createAccessToken({
+      sub: user.id,
+      telegramId,
+      role: user.role,
+      authMethod: 'browser',
+      sessionId: result.session.id
+    }, '30d');
+    return res.json({ token: accessToken, user: serializeUser(user), expiresAt: result.session.expiresAt });
   } catch (error) {
     return next(error);
   }

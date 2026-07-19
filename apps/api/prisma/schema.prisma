@@ -26,21 +26,51 @@ enum PointTransactionType {
 }
 
 model User {
-  id                String             @id @default(cuid())
-  telegramId        BigInt             @unique
-  username          String?
-  firstName         String
-  lastName          String?
-  photoUrl          String?
-  role              UserRole           @default(PLAYER)
-  points            Int                @default(0)
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  results           TournamentResult[]
-  pointTransactions PointTransaction[] @relation("PointRecipient")
-  pointChangesMade  PointTransaction[] @relation("PointAdmin")
+  id                    String                @id @default(cuid())
+  telegramId            BigInt                @unique
+  username              String?
+  firstName             String
+  lastName              String?
+  photoUrl              String?
+  role                  UserRole              @default(PLAYER)
+  points                Int                   @default(0)
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  results               TournamentResult[]
+  pointTransactions     PointTransaction[]    @relation("PointRecipient")
+  pointChangesMade      PointTransaction[]    @relation("PointAdmin")
+  browserInvites        BrowserAccessInvite[] @relation("BrowserInviteRecipient")
+  browserInvitesCreated BrowserAccessInvite[] @relation("BrowserInviteAdmin")
+  browserSessions       BrowserSession[]
 
   @@index([points, createdAt])
+}
+
+model BrowserAccessInvite {
+  id          String    @id @default(cuid())
+  tokenHash   String    @unique
+  userId      String
+  createdById String
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+  user        User      @relation("BrowserInviteRecipient", fields: [userId], references: [id], onDelete: Cascade)
+  createdBy   User      @relation("BrowserInviteAdmin", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([userId, expiresAt])
+  @@index([createdById, createdAt])
+}
+
+model BrowserSession {
+  id        String    @id @default(cuid())
+  userId    String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([revokedAt, expiresAt])
 }
 
 model Season {

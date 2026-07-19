@@ -14,6 +14,8 @@ const players = [
 ] as const;
 
 async function main() {
+  await prisma.browserSession.deleteMany();
+  await prisma.browserAccessInvite.deleteMany();
   await prisma.pointTransaction.deleteMany();
   await prisma.notificationLog.deleteMany();
   await prisma.tournamentResult.deleteMany();
