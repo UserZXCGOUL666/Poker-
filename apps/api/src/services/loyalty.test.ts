@@ -1,0 +1,25 @@
+import { describe, expect, it } from 'vitest';
+import { calculateVisitStreak, clubDayKey, dailyIndex } from './loyalty.js';
+
+describe('loyalty rules', () => {
+  it('creates a stable club day in the configured timezone', () => {
+    const instant = new Date('2026-07-20T21:30:00.000Z');
+    expect(clubDayKey(instant, 'Europe/Moscow')).toBe('2026-07-21');
+    expect(clubDayKey(instant, 'UTC')).toBe('2026-07-20');
+  });
+
+  it('selects the same content for the same day and salt', () => {
+    expect(dailyIndex('2026-07-20', 12, 'tip')).toBe(dailyIndex('2026-07-20', 12, 'tip'));
+    expect(dailyIndex('2026-07-20', 0, 'tip')).toBe(-1);
+  });
+
+  it('counts current and best visit streaks with reset gaps', () => {
+    const dates = ['2026-01-01', '2026-01-08', '2026-01-15', '2026-03-01', '2026-03-08'].map((value) => new Date(`${value}T12:00:00.000Z`));
+    expect(calculateVisitStreak(dates, 21)).toEqual({ current: 2, best: 3 });
+  });
+
+  it('does not double count two check-ins on the same day', () => {
+    const dates = [new Date('2026-01-01T10:00:00.000Z'), new Date('2026-01-01T20:00:00.000Z'), new Date('2026-01-08T12:00:00.000Z')];
+    expect(calculateVisitStreak(dates, 21)).toEqual({ current: 2, best: 2 });
+  });
+});

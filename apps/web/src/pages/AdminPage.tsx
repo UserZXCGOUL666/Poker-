@@ -1,9 +1,9 @@
 import {
   ArrowDown, ArrowLeft, ArrowUp, Bell, CalendarDays, CalendarPlus, CheckCircle2, ChevronRight,
-  Armchair, CircleAlert, ClipboardCheck, Coins, Copy, Edit3, Eye, EyeOff, FileStack, Filter, History, ImagePlus, KeyRound, LayoutDashboard,
+  Armchair, CircleAlert, ClipboardCheck, Coins, Copy, Edit3, Eye, EyeOff, FileStack, Filter, Gift, History, ImagePlus, KeyRound, LayoutDashboard,
   ListChecks, LogOut, Medal, MonitorSmartphone, NotebookPen, Plus, RefreshCw, RotateCcw, Save,
   Search, Settings, ShieldCheck, ShieldOff, Shuffle, Spade, Tags, Trash2, Trophy, UserCheck, UserMinus, UserRound, Play,
-  Users, X, MoreHorizontal, Phone
+  Users, X, MoreHorizontal, Phone, BarChart3
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
@@ -14,8 +14,10 @@ import { api, post } from '../lib/api';
 import { deriveAdminWorkflow, type AdminFocusTournament } from '../lib/adminWorkflow';
 import { points, tournamentDate } from '../lib/format';
 import type { PlayerTag, PointTransaction, Season, Tournament, TournamentRegistrationStatus, User } from '../types';
+import { LoyaltyAdminTab } from './LoyaltyAdminTab';
+import { AnalyticsAdminTab } from './AnalyticsAdminTab';
 
-type AdminSection = 'overview' | 'players' | 'tournaments' | 'seating' | 'audit' | 'access' | 'settings' | 'more';
+type AdminSection = 'overview' | 'players' | 'tournaments' | 'seating' | 'loyalty' | 'analytics' | 'audit' | 'access' | 'settings' | 'more';
 type AdminIntentKind = 'points' | 'newTournament' | 'results' | 'participants' | 'invite' | 'openTournament' | 'seating';
 type AdminIntent = { kind: AdminIntentKind; nonce: number; targetId?: string } | null;
 type AdminUser = Pick<User, 'id' | 'telegramId' | 'firstName' | 'lastName' | 'username' | 'role' | 'points'> & {
@@ -82,6 +84,8 @@ const desktopSections = [
   { id: 'players' as const, label: 'Игроки', icon: Users },
   { id: 'tournaments' as const, label: 'Турниры', icon: CalendarDays },
   { id: 'seating' as const, label: 'Рассадка', icon: Armchair },
+  { id: 'loyalty' as const, label: 'Лояльность', icon: Gift },
+  { id: 'analytics' as const, label: 'Аналитика', icon: BarChart3 },
   { id: 'audit' as const, label: 'Аудит', icon: History },
   { id: 'access' as const, label: 'Доступ', icon: KeyRound },
   { id: 'settings' as const, label: 'Настройки', icon: Settings }
@@ -93,7 +97,7 @@ const mobileSections = [
   { id: 'more' as const, label: 'Ещё', icon: MoreHorizontal }
 ];
 const sectionTitles: Record<AdminSection, string> = {
-  overview: 'Сегодня', players: 'Игроки', tournaments: 'Турниры', seating: 'Рассадка', audit: 'Аудит', access: 'Безопасность', settings: 'Настройки', more: 'Ещё'
+  overview: 'Сегодня', players: 'Игроки', tournaments: 'Турниры', seating: 'Рассадка', loyalty: 'Лояльность', analytics: 'Аналитика', audit: 'Аудит', access: 'Безопасность', settings: 'Настройки', more: 'Ещё'
 };
 
 export function AdminPage() {
@@ -145,7 +149,7 @@ export function AdminPage() {
 
   useEffect(() => { void loadOverview(); }, [loadOverview]);
   useEffect(() => {
-    if (section === 'overview' || section === 'audit' || section === 'more' || loadedSections[section]) return;
+    if (section === 'overview' || section === 'loyalty' || section === 'analytics' || section === 'audit' || section === 'more' || loadedSections[section]) return;
     void loadSectionData(section);
   }, [section, loadedSections, loadSectionData]);
 
@@ -157,14 +161,14 @@ export function AdminPage() {
     setNotice(message);
     window.setTimeout(() => setNotice(null), 3500);
     void loadOverview();
-    if (section !== 'overview' && section !== 'audit' && section !== 'more') void loadSectionData(section);
+    if (section !== 'overview' && section !== 'loyalty' && section !== 'analytics' && section !== 'audit' && section !== 'more') void loadSectionData(section);
   }
 
   if (error) return <div className="admin-shell"><ErrorState message={error} /></div>;
   if (!overview) return <div className="admin-shell"><Loading label="Открываем админку…" /></div>;
 
-  const moreActive = section === 'more' || section === 'seating' || section === 'audit' || section === 'access' || section === 'settings';
-  const sectionReady = section === 'overview' || section === 'audit' || section === 'more' || Boolean(loadedSections[section]);
+  const moreActive = section === 'more' || section === 'seating' || section === 'loyalty' || section === 'analytics' || section === 'audit' || section === 'access' || section === 'settings';
+  const sectionReady = section === 'overview' || section === 'loyalty' || section === 'analytics' || section === 'audit' || section === 'more' || Boolean(loadedSections[section]);
   return <div className="admin-shell">
     <aside className="admin-sidebar">
       <div className="admin-brand"><span><Spade size={21} fill="currentColor" /></span><div><strong>POKER CLUB</strong><small>Панель управления</small></div></div>
@@ -180,6 +184,8 @@ export function AdminPage() {
       {section === 'players' && sectionReady && <PlayersTab users={users} tags={tags} reasonPresets={reasonPresets} intent={intent} onDone={done} />}
       {section === 'tournaments' && sectionReady && <TournamentsTab seasons={seasons} tournaments={tournaments} users={users} templates={templates} intent={intent} onDone={done} />}
       {section === 'seating' && sectionReady && <SeatingTab tournaments={tournaments} intent={intent} onDone={done} />}
+      {section === 'loyalty' && <LoyaltyAdminTab onDone={done} />}
+      {section === 'analytics' && <AnalyticsAdminTab />}
       {section === 'audit' && <AuditTab />}
       {section === 'access' && sectionReady && <AccessTab users={users} onDone={done} />}
       {section === 'settings' && sectionReady && <SettingsTab seasons={seasons} tags={tags} reasonPresets={reasonPresets} onDone={done} />}
@@ -1100,7 +1106,7 @@ function AuditJson({ title, value }: { title: string; value: unknown }) {
 }
 
 function MoreTab({ onNavigate }: { onNavigate: (section: AdminSection) => void }) {
-  return <div className="admin-view more-view"><AdminHeading eyebrow="УПРАВЛЕНИЕ" title="Ещё" text="Рассадка, аудит, безопасность и параметры клуба" /><div className="more-menu-grid"><button onClick={() => onNavigate('seating')}><span><Armchair /></span><div><strong>Рассадка игроков</strong><small>Столы, места и публикация</small></div><ChevronRight /></button><button onClick={() => onNavigate('audit')}><span><History /></span><div><strong>Аудит действий</strong><small>Полная история изменений</small></div><ChevronRight /></button><button onClick={() => onNavigate('access')}><span><KeyRound /></span><div><strong>Доступ из браузера</strong><small>Приглашения и активные сессии</small></div><ChevronRight /></button><button onClick={() => onNavigate('settings')}><span><Settings /></span><div><strong>Настройки</strong><small>Сезоны, оформление, причины и теги</small></div><ChevronRight /></button><Link to="/"><span><LogOut /></span><div><strong>Вернуться в приложение</strong><small>Закрыть панель управления</small></div><ChevronRight /></Link></div></div>;
+  return <div className="admin-view more-view"><AdminHeading eyebrow="УПРАВЛЕНИЕ" title="Ещё" text="Аналитика, лояльность, рассадка, аудит, безопасность и параметры клуба" /><div className="more-menu-grid"><button onClick={() => onNavigate('analytics')}><span><BarChart3 /></span><div><strong>Аналитика клуба</strong><small>Явка, рост, активность и эффективность</small></div><ChevronRight /></button><button onClick={() => onNavigate('loyalty')}><span><Gift /></span><div><strong>Программа лояльности</strong><small>Club XP, советы, раздачи и рефералы</small></div><ChevronRight /></button><button onClick={() => onNavigate('seating')}><span><Armchair /></span><div><strong>Рассадка игроков</strong><small>Столы, места и публикация</small></div><ChevronRight /></button><button onClick={() => onNavigate('audit')}><span><History /></span><div><strong>Аудит действий</strong><small>Полная история изменений</small></div><ChevronRight /></button><button onClick={() => onNavigate('access')}><span><KeyRound /></span><div><strong>Доступ из браузера</strong><small>Приглашения и активные сессии</small></div><ChevronRight /></button><button onClick={() => onNavigate('settings')}><span><Settings /></span><div><strong>Настройки</strong><small>Сезоны, оформление, причины и теги</small></div><ChevronRight /></button><Link to="/"><span><LogOut /></span><div><strong>Вернуться в приложение</strong><small>Закрыть панель управления</small></div><ChevronRight /></Link></div></div>;
 }
 
 function InviteResult({ invite, onCopied }: { invite: BrowserInviteResult; onCopied: (message: string) => void }) {

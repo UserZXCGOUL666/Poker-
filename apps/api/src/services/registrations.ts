@@ -2,9 +2,14 @@ import { Prisma, TournamentRegistrationStatus } from '@prisma/client';
 import { prisma } from '../db.js';
 import { AppError } from '../errors.js';
 import { writeAudit } from './audit.js';
+import { evaluateAchievements, qualifyReferralInTransaction } from './loyalty.js';
 
 const occupiedStatuses: TournamentRegistrationStatus[] = [
   TournamentRegistrationStatus.REGISTERED,
+  TournamentRegistrationStatus.CHECKED_IN,
+  TournamentRegistrationStatus.PLAYED
+];
+const attendedStatuses: TournamentRegistrationStatus[] = [
   TournamentRegistrationStatus.CHECKED_IN,
   TournamentRegistrationStatus.PLAYED
 ];
@@ -88,7 +93,7 @@ export async function updateRegistrationStatus(registrationId: string, status: T
   if (status === TournamentRegistrationStatus.CANCELLED) {
     return cancelTournamentRegistration(registrationId, { actorId, actorIsAdmin: true });
   }
-  return withRegistrationRetry(async (tx) => {
+  const result = await withRegistrationRetry(async (tx) => {
     const current = await tx.tournamentRegistration.findUnique({
       where: { id: registrationId },
       include: { tournament: true, user: { select: { id: true, telegramId: true, firstName: true, lastName: true, username: true } } }
@@ -123,8 +128,15 @@ export async function updateRegistrationStatus(registrationId: string, status: T
       after: { status },
       metadata: { tournamentId: current.tournamentId, userId: current.userId }
     });
+    if (attendedStatuses.includes(status) && !attendedStatuses.includes(current.status)) {
+      await qualifyReferralInTransaction(tx, current.userId, actorId);
+    }
     return { registration, user: current.user, promoted, tournament: current.tournament, duplicate: false, previousStatus: current.status };
   });
+  if (attendedStatuses.includes(status) && !result.duplicate) {
+    await evaluateAchievements(result.user.id).catch((error) => console.error('Не удалось проверить достижения', error));
+  }
+  return result;
 }
 
 async function promoteFirstWaitlisted(tx: Prisma.TransactionClient, tournamentId: string, excludeId?: string) {

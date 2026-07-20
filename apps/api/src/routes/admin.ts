@@ -15,9 +15,13 @@ import { registerForTournament, shouldNotifyRegistrationStatusChange, updateRegi
 import { generateRecurringTournaments } from '../services/recurringTournaments.js';
 import { finalizeSeason } from '../services/seasonsFinalization.js';
 import { assignPlayerSeat, autoSeatTournament, getTournamentSeating, unseatPlayer } from '../services/seating.js';
+import { loyaltyAdminRouter } from './loyaltyAdmin.js';
+import { analyticsAdminRouter } from './analyticsAdmin.js';
 
 export const adminRouter = Router();
 adminRouter.use(requireAuth, requireAdmin);
+adminRouter.use('/loyalty', loyaltyAdminRouter);
+adminRouter.use('/analytics', analyticsAdminRouter);
 
 adminRouter.get('/overview', async (_req, res) => {
   const now = new Date();
@@ -165,7 +169,7 @@ adminRouter.get('/users', async (req, res) => {
     orderBy: [{ points: 'desc' }, { firstName: 'asc' }],
     take: 1000,
     select: {
-      id: true, telegramId: true, firstName: true, lastName: true, username: true, role: true, points: true, phoneNumber: true, phoneSharedAt: true,
+      id: true, telegramId: true, firstName: true, lastName: true, username: true, role: true, points: true, clubXp: true, phoneNumber: true, phoneSharedAt: true,
       tags: { include: { tag: true } },
       results: { orderBy: { createdAt: 'desc' }, take: 1, select: { createdAt: true, tournament: { select: { startsAt: true } } } },
       _count: { select: { results: true, browserSessions: { where: { revokedAt: null, expiresAt: { gt: new Date() } } }, registrations: true } }

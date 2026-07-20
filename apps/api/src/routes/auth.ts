@@ -7,11 +7,13 @@ import { AppError } from '../errors.js';
 import { createAccessToken, requireAuth } from '../middleware/auth.js';
 import { browserSessionExpiresAt, hashBrowserInviteToken } from '../services/browserAccess.js';
 import { validateTelegramInitData, type TelegramUserData } from '../services/telegramAuth.js';
+import { createReferralForNewUser, ensureReferralCode, recordDailyAppOpen } from '../services/loyalty.js';
 
 export const authRouter = Router();
 
 const bodySchema = z.object({
   initData: z.string().optional(),
+  referralCode: z.string().trim().max(32).optional(),
   devUser: z.object({
     id: z.coerce.number().int().positive(),
     first_name: z.string().default('Алексей'),
@@ -34,6 +36,7 @@ authRouter.post('/telegram', async (req, res, next) => {
     }
 
     const telegramId = String(telegramUser.id);
+    const existingUser = await prisma.user.findUnique({ where: { telegramId: BigInt(telegramId) }, select: { id: true } });
     const role = adminTelegramIds.has(telegramId) ? UserRole.ADMIN : UserRole.PLAYER;
     const user = await prisma.user.upsert({
       where: { telegramId: BigInt(telegramId) },
@@ -53,6 +56,10 @@ authRouter.post('/telegram', async (req, res, next) => {
         role
       }
     });
+
+    await ensureReferralCode(user.id);
+    if (!existingUser) await createReferralForNewUser(user.id, body.referralCode);
+    await recordDailyAppOpen(user.id).catch((error) => console.error('Не удалось записать открытие приложения', error));
 
     const token = createAccessToken({ sub: user.id, telegramId, role: user.role, authMethod: 'telegram' });
     return res.json({ token, user: serializeUser(user) });
@@ -115,6 +122,6 @@ authRouter.get('/me', requireAuth, async (req, res) => {
   return res.json(serializeUser(user));
 });
 
-function serializeUser(user: { id: string; telegramId: bigint; username: string | null; firstName: string; lastName: string | null; photoUrl: string | null; role: UserRole; points: number }) {
+function serializeUser(user: { id: string; telegramId: bigint; username: string | null; firstName: string; lastName: string | null; photoUrl: string | null; role: UserRole; points: number; clubXp: number }) {
   return { ...user, telegramId: user.telegramId.toString() };
 }

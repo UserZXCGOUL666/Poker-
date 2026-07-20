@@ -2,6 +2,7 @@ import { Armchair, ArrowRight, ChevronRight } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Avatar } from '../components/Avatar';
+import { DailyEngagement } from '../components/DailyEngagement';
 import { ErrorState, Loading } from '../components/Loading';
 import { api, apiAssetUrl } from '../lib/api';
 import { points, tournamentDate } from '../lib/format';
@@ -31,6 +32,8 @@ export function HomePage() {
     </section>
 
     {data.nextSeating && <section className="my-seat-card card"><span><Armchair /></span><div><small>ВАША РАССАДКА · {data.nextSeating.tournament.title}</small><strong>Стол №{data.nextSeating.table.number} <i>·</i> Место №{data.nextSeating.seatNumber}</strong></div><Link to="/games"><ChevronRight /></Link></section>}
+
+    <DailyEngagement />
 
     <div className="section-title"><h2>Следующая игра</h2><Link to="/games">Все игры</Link></div>
     {data.nextTournament && next ? (

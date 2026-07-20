@@ -13,6 +13,7 @@ export type User = {
   photoUrl: string | null;
   role: Role;
   points: number;
+  clubXp: number;
 };
 
 export type Player = Pick<User, 'id' | 'firstName' | 'lastName' | 'username' | 'photoUrl' | 'points'> & { rank?: number };
@@ -77,4 +78,55 @@ export type HomeData = {
   leaders: Player[];
   branding?: { hasRatingBanner: boolean; updatedAt: string | null };
   nextSeating: { seatNumber: number; table: { number: number }; tournament: { id: string; title: string; startsAt: string } } | null;
+};
+
+export type ClubXpTransaction = {
+  id: string;
+  userId: string;
+  source: 'DAILY_HAND' | 'REFERRAL_INVITER' | 'REFERRAL_INVITEE' | 'ACHIEVEMENT' | 'ADMIN_ADJUSTMENT' | 'REVERSAL';
+  amount: number;
+  balanceAfter: number;
+  reason: string;
+  createdAt: string;
+};
+
+export type DailyContent = {
+  dayKey: string;
+  clubXp: number;
+  tip: { id: string; title: string; body: string; category: string } | null;
+  hand: {
+    id: string;
+    title: string;
+    scenario: string;
+    heroCards: string[];
+    boardCards: string[];
+    difficulty: string;
+    rewardXp: number;
+    options: { id: string; label: string; explanation?: string }[];
+    attempt: {
+      selectedOptionId: string;
+      correctOptionId: string | null;
+      isCorrect: boolean;
+      awardedXp: number;
+      attemptedAt: string;
+    } | null;
+  } | null;
+};
+
+export type ReferralInfo = {
+  referralCode: string;
+  shareLink: string | null;
+  fallbackMiniAppUrl: string;
+  rewardXp: number;
+  inviteeRewardXp: number;
+  enabled: boolean;
+  referrals: {
+    id: string;
+    status: 'PENDING' | 'REWARDED' | 'REJECTED';
+    inviterXp: number;
+    inviteeXp: number;
+    createdAt: string;
+    rewardedAt: string | null;
+    invitedUser: Pick<User, 'id' | 'firstName' | 'lastName' | 'username' | 'photoUrl'>;
+  }[];
 };

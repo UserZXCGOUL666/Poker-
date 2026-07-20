@@ -4,6 +4,10 @@ import { prisma } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { cancelTournamentRegistration, registerForTournament } from '../services/registrations.js';
 import { notifyUser, registrationNotification } from '../bot.js';
+import { getBotUsername } from '../bot.js';
+import { z } from 'zod';
+import { answerDailyHand, ensureReferralCode, evaluateAchievements, getDailyContent, getPlayerLoyaltyStats } from '../services/loyalty.js';
+import { env } from '../config.js';
 
 export const publicRouter = Router();
 
@@ -122,17 +126,58 @@ publicRouter.get('/leaderboard', async (req, res) => {
   return res.json(sums.map((item, index) => ({ ...map.get(item.userId), points: item._sum.amount ?? 0, rank: index + 1 })));
 });
 
+publicRouter.get('/loyalty/daily', async (req, res, next) => {
+  try { return res.json(await getDailyContent(req.auth!.userId)); }
+  catch (error) { return next(error); }
+});
+
+const dailyAnswerSchema = z.object({ optionId: z.string().min(1).max(100) });
+publicRouter.post('/loyalty/daily/answer', async (req, res, next) => {
+  try {
+    const { optionId } = dailyAnswerSchema.parse(req.body);
+    return res.json(await answerDailyHand(req.auth!.userId, optionId));
+  } catch (error) { return next(error); }
+});
+
+publicRouter.get('/loyalty/referral', async (req, res, next) => {
+  try {
+    const referralCode = await ensureReferralCode(req.auth!.userId);
+    const [botUsername, referrals, settings] = await Promise.all([
+      getBotUsername(),
+      prisma.referral.findMany({
+        where: { referrerId: req.auth!.userId },
+        orderBy: { createdAt: 'desc' },
+        include: { invitedUser: { select: { id: true, firstName: true, lastName: true, username: true, photoUrl: true } } }
+      }),
+      prisma.loyaltySettings.upsert({ where: { id: 'main' }, update: {}, create: { id: 'main' } })
+    ]);
+    const shareLink = botUsername ? `https://t.me/${botUsername}?start=ref_${referralCode}` : null;
+    return res.json({
+      referralCode,
+      shareLink,
+      fallbackMiniAppUrl: `${env.MINI_APP_URL}${env.MINI_APP_URL.includes('?') ? '&' : '?'}ref=${referralCode}`,
+      rewardXp: settings.referralInviterXp,
+      inviteeRewardXp: settings.referralInviteeXp,
+      enabled: settings.referralEnabled,
+      referrals
+    });
+  } catch (error) { return next(error); }
+});
+
 publicRouter.get('/profile', async (req, res) => {
+  await evaluateAchievements(req.auth!.userId).catch((error) => console.error('Не удалось обновить достижения профиля', error));
   const user = await prisma.user.findUnique({
     where: { id: req.auth!.userId },
     select: {
       ...userSelect,
       telegramId: true,
       role: true,
+      clubXp: true,
+      referralCode: true,
       createdAt: true,
       phoneNumber: true,
       phoneSharedAt: true,
-      results: { include: { tournament: true }, orderBy: { createdAt: 'desc' }, take: 10 },
+      results: { include: { tournament: true }, orderBy: { createdAt: 'desc' }, take: 50 },
       pointTransactions: {
         where: { season: { isActive: true } },
         orderBy: { createdAt: 'desc' },
@@ -141,17 +186,42 @@ publicRouter.get('/profile', async (req, res) => {
           createdBy: { select: { id: true, firstName: true, lastName: true } },
           season: { select: { id: true, name: true } }
         }
+      },
+      clubXpTransactions: { orderBy: { createdAt: 'desc' }, take: 30 },
+      achievements: { orderBy: { unlockedAt: 'desc' }, include: { achievement: true } },
+      registrations: {
+        where: { tournament: { status: { in: ['UPCOMING', 'ACTIVE'] } }, status: { not: 'CANCELLED' } },
+        orderBy: { tournament: { startsAt: 'asc' } },
+        include: { tournament: true }
+      },
+      referralsSent: {
+        orderBy: { createdAt: 'desc' },
+        include: { invitedUser: { select: { id: true, firstName: true, lastName: true, username: true, photoUrl: true } } }
       }
     }
   });
   if (!user) return res.status(404).json({ message: 'Пользователь не найден' });
-  const rank = await prisma.user.count({ where: { points: { gt: user.points } } });
+  const [rank, loyaltyStats, gamesPlayed, bestResult] = await Promise.all([
+    prisma.user.count({ where: { points: { gt: user.points } } }),
+    getPlayerLoyaltyStats(user.id),
+    prisma.tournamentResult.count({ where: { userId: user.id } }),
+    prisma.tournamentResult.aggregate({ where: { userId: user.id }, _min: { place: true } })
+  ]);
   return res.json({
     ...user,
     telegramId: user.telegramId.toString(),
     phoneNumber: undefined,
     hasPhoneNumber: Boolean(user.phoneNumber),
     phoneNumberMasked: user.phoneNumber ? `${user.phoneNumber.slice(0, 4)}••••${user.phoneNumber.slice(-2)}` : null,
-    rank: rank + 1
+    rank: rank + 1,
+    stats: {
+      gamesPlayed,
+      wins: loyaltyStats.wins,
+      finalTables: loyaltyStats.finalTables,
+      finalTableRate: gamesPlayed ? Math.round(loyaltyStats.finalTables / gamesPlayed * 100) : 0,
+      bestPlace: bestResult._min.place,
+      currentStreak: loyaltyStats.streak.current,
+      bestStreak: loyaltyStats.streak.best
+    }
   });
 });

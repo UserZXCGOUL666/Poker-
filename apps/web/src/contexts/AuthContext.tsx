@@ -28,6 +28,8 @@ export function AuthProvider({ children }: PropsWithChildren) {
         const telegram = window.Telegram?.WebApp;
         telegram?.ready();
         telegram?.expand();
+        const referralFromUrl = new URLSearchParams(window.location.search).get('ref');
+        if (referralFromUrl && /^[a-zA-Z0-9_-]{6,32}$/.test(referralFromUrl)) sessionStorage.setItem('poker-club-referral', referralFromUrl);
         const browserInvite = window.location.pathname === '/browser-login'
           ? new URLSearchParams(window.location.search).get('token')
           : null;
@@ -63,14 +65,20 @@ export function AuthProvider({ children }: PropsWithChildren) {
         }
 
         const devId = import.meta.env.VITE_DEV_TELEGRAM_ID;
+        const referralCode = sessionStorage.getItem('poker-club-referral') ?? undefined;
         const payload = telegram?.initData
-          ? { initData: telegram.initData }
+          ? { initData: telegram.initData, referralCode }
           : devId
-            ? { devUser: { id: Number(devId), first_name: 'Алексей', last_name: 'Ковалёв', username: 'demo_admin' } }
+            ? { devUser: { id: Number(devId), first_name: 'Алексей', last_name: 'Ковалёв', username: 'demo_admin' }, referralCode }
             : { initData: '' };
         const result = await post<{ token: string; user: User }>('/auth/telegram', payload);
         localStorage.setItem('poker-club-token', result.token);
         localStorage.setItem('poker-club-auth-method', 'telegram');
+        sessionStorage.removeItem('poker-club-referral');
+        if (referralFromUrl) {
+          const cleanUrl = new URL(window.location.href); cleanUrl.searchParams.delete('ref');
+          window.history.replaceState({}, '', `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+        }
         if (active) setUser(result.user);
       } catch (cause) {
         if (active) setError(cause instanceof Error ? cause.message : 'Не удалось войти через Telegram');

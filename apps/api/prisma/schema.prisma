@@ -39,6 +39,31 @@ enum ReasonPresetKind {
   BOTH
 }
 
+enum ClubXpSource {
+  DAILY_HAND
+  REFERRAL_INVITER
+  REFERRAL_INVITEE
+  ACHIEVEMENT
+  ADMIN_ADJUSTMENT
+  REVERSAL
+}
+
+enum ReferralStatus {
+  PENDING
+  REWARDED
+  REJECTED
+}
+
+enum AchievementRule {
+  FIRST_VISIT
+  FIRST_WIN
+  VISITS
+  FINAL_TABLES
+  REFERRALS
+  STREAK
+  DAILY_HAND_CORRECT
+}
+
 model User {
   id                    String                   @id @default(cuid())
   telegramId            BigInt                   @unique
@@ -48,6 +73,9 @@ model User {
   photoUrl              String?
   role                  UserRole                 @default(PLAYER)
   points                Int                      @default(0)
+  clubXp                Int                      @default(0)
+  referralCode          String?                  @unique
+  lastSeenAt            DateTime                 @default(now())
   adminNote             String?
   phoneNumber           String?                  @unique
   phoneSharedAt         DateTime?
@@ -66,8 +94,17 @@ model User {
   finalizedSeasons      Season[]                 @relation("SeasonFinalizedBy")
   seasonStandings       SeasonStanding[]
   seatAssignments       TournamentSeat[]
+  clubXpTransactions    ClubXpTransaction[]      @relation("ClubXpRecipient")
+  clubXpChangesMade     ClubXpTransaction[]      @relation("ClubXpAdmin")
+  achievements          UserAchievement[]
+  referralsSent         Referral[]               @relation("ReferralInviter")
+  referralReceived      Referral?                @relation("ReferralInvitee")
+  dailyHandAttempts     DailyHandAttempt[]
+  analyticsEvents       AnalyticsEvent[]
 
   @@index([points, createdAt])
+  @@index([clubXp, createdAt])
+  @@index([lastSeenAt])
 }
 
 model BrowserAccessInvite {
@@ -315,6 +352,162 @@ model ClubSettings {
   id                    String   @id @default("main")
   ratingBannerImageData String?  @db.Text
   updatedAt             DateTime @updatedAt
+}
+
+model LoyaltySettings {
+  id                String   @id @default("main")
+  dailyHandXp       Int      @default(10)
+  referralInviterXp Int      @default(100)
+  referralInviteeXp Int      @default(50)
+  referralEnabled   Boolean  @default(true)
+  dailyHandEnabled  Boolean  @default(true)
+  tipsEnabled       Boolean  @default(true)
+  streakResetDays   Int      @default(21)
+  updatedAt         DateTime @updatedAt
+}
+
+model ClubXpTransaction {
+  id             String             @id @default(cuid())
+  userId         String
+  createdById    String?
+  source         ClubXpSource
+  amount         Int
+  balanceAfter   Int
+  reason         String
+  idempotencyKey String             @unique
+  metadata       Json?
+  reversalOfId   String?            @unique
+  createdAt      DateTime           @default(now())
+  user           User               @relation("ClubXpRecipient", fields: [userId], references: [id], onDelete: Restrict)
+  createdBy      User?              @relation("ClubXpAdmin", fields: [createdById], references: [id], onDelete: SetNull)
+  reversalOf     ClubXpTransaction? @relation("ClubXpReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversedBy     ClubXpTransaction? @relation("ClubXpReversal")
+
+  @@index([userId, createdAt])
+  @@index([source, createdAt])
+  @@index([createdById, createdAt])
+}
+
+model PokerTip {
+  id        String   @id @default(cuid())
+  title     String
+  body      String   @db.Text
+  category  String   @default("Стратегия")
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([isActive, sortOrder])
+}
+
+model PokerHand {
+  id         String             @id @default(cuid())
+  title      String
+  scenario   String             @db.Text
+  heroCards  String[]
+  boardCards String[]
+  difficulty String             @default("Начальный")
+  sortOrder  Int                @default(0)
+  isActive   Boolean            @default(true)
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  options    PokerHandOption[]
+  attempts   DailyHandAttempt[]
+
+  @@index([isActive, sortOrder])
+}
+
+model PokerHandOption {
+  id          String             @id @default(cuid())
+  handId      String
+  label       String
+  explanation String             @db.Text
+  isCorrect   Boolean            @default(false)
+  sortOrder   Int                @default(0)
+  hand        PokerHand          @relation(fields: [handId], references: [id], onDelete: Cascade)
+  attempts    DailyHandAttempt[]
+
+  @@index([handId, sortOrder])
+}
+
+model DailyHandAttempt {
+  id               String          @id @default(cuid())
+  userId           String
+  handId           String
+  selectedOptionId String
+  dayKey           String
+  isCorrect        Boolean
+  awardedXp        Int             @default(0)
+  attemptedAt      DateTime        @default(now())
+  user             User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  hand             PokerHand       @relation(fields: [handId], references: [id], onDelete: Restrict)
+  selectedOption   PokerHandOption @relation(fields: [selectedOptionId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, dayKey])
+  @@index([handId, attemptedAt])
+}
+
+model Achievement {
+  id          String            @id @default(cuid())
+  key         String            @unique
+  title       String
+  description String
+  icon        String            @default("trophy")
+  rule        AchievementRule
+  threshold   Int               @default(1)
+  xpReward    Int               @default(0)
+  sortOrder   Int               @default(0)
+  isActive    Boolean           @default(true)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  users       UserAchievement[]
+
+  @@index([isActive, sortOrder])
+}
+
+model UserAchievement {
+  id            String      @id @default(cuid())
+  userId        String
+  achievementId String
+  xpAwarded     Int         @default(0)
+  unlockedAt    DateTime    @default(now())
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, achievementId])
+  @@index([userId, unlockedAt])
+}
+
+model Referral {
+  id            String         @id @default(cuid())
+  referrerId    String
+  invitedUserId String         @unique
+  status        ReferralStatus @default(PENDING)
+  inviterXp     Int            @default(0)
+  inviteeXp     Int            @default(0)
+  createdAt     DateTime       @default(now())
+  qualifiedAt   DateTime?
+  rewardedAt    DateTime?
+  rejectedAt    DateTime?
+  referrer      User           @relation("ReferralInviter", fields: [referrerId], references: [id], onDelete: Restrict)
+  invitedUser   User           @relation("ReferralInvitee", fields: [invitedUserId], references: [id], onDelete: Restrict)
+
+  @@index([referrerId, status, createdAt])
+  @@index([status, createdAt])
+}
+
+model AnalyticsEvent {
+  id             String   @id @default(cuid())
+  userId         String?
+  type           String
+  idempotencyKey String?  @unique
+  metadata       Json?
+  createdAt      DateTime @default(now())
+  user           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([type, createdAt])
+  @@index([userId, createdAt])
 }
 
 model AuditLog {

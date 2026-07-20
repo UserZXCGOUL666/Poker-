@@ -5,10 +5,20 @@ import { prisma } from './db.js';
 import { writeAudit } from './services/audit.js';
 
 export const bot = env.TELEGRAM_BOT_TOKEN ? new Bot(env.TELEGRAM_BOT_TOKEN) : null;
+let cachedBotUsername: string | null | undefined;
+
+function miniAppUrlWithReferral(rawMatch: string | undefined) {
+  const code = rawMatch?.trim().replace(/^ref[_-]?/i, '').toUpperCase();
+  if (!code || !/^[A-Z0-9]{6,20}$/.test(code)) return env.MINI_APP_URL;
+  const url = new URL(env.MINI_APP_URL);
+  url.searchParams.set('ref', code);
+  return url.toString();
+}
 
 if (bot) {
   bot.command('start', async (ctx) => {
-    const keyboard = new InlineKeyboard().webApp('Открыть Poker Club', env.MINI_APP_URL);
+    const referralMatch = typeof ctx.match === 'string' ? ctx.match : undefined;
+    const keyboard = new InlineKeyboard().webApp('Открыть Poker Club', miniAppUrlWithReferral(referralMatch));
     await ctx.reply(
       `Добро пожаловать в Poker Club, ${ctx.from?.first_name ?? 'игрок'}!\n\nЗдесь находятся игры, рейтинг сезона и ваши результаты.`,
       { reply_markup: keyboard }
@@ -68,6 +78,18 @@ if (bot) {
   });
 
   bot.catch((error) => console.error('Telegram bot error', error.error));
+}
+
+export async function getBotUsername() {
+  if (cachedBotUsername !== undefined) return cachedBotUsername;
+  if (!bot) return (cachedBotUsername = null);
+  try {
+    const me = await bot.api.getMe();
+    cachedBotUsername = me.username;
+  } catch {
+    cachedBotUsername = null;
+  }
+  return cachedBotUsername;
 }
 
 export async function configureWebhook() {

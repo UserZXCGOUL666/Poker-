@@ -14,6 +14,11 @@ const players = [
 ] as const;
 
 async function main() {
+  await prisma.analyticsEvent.deleteMany();
+  await prisma.dailyHandAttempt.deleteMany();
+  await prisma.userAchievement.deleteMany();
+  await prisma.clubXpTransaction.deleteMany();
+  await prisma.referral.deleteMany();
   await prisma.seasonStanding.deleteMany();
   await prisma.auditLog.deleteMany();
   await prisma.userTag.deleteMany();
