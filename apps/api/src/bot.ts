@@ -1,6 +1,8 @@
-import { Bot, InlineKeyboard } from 'grammy';
+import { Prisma } from '@prisma/client';
+import { Bot, InlineKeyboard, Keyboard } from 'grammy';
 import { env } from './config.js';
 import { prisma } from './db.js';
+import { writeAudit } from './services/audit.js';
 
 export const bot = env.TELEGRAM_BOT_TOKEN ? new Bot(env.TELEGRAM_BOT_TOKEN) : null;
 
@@ -17,6 +19,52 @@ if (bot) {
     await ctx.reply('Открыть приложение:', {
       reply_markup: new InlineKeyboard().webApp('Poker Club', env.MINI_APP_URL)
     });
+  });
+
+  bot.command('phone', async (ctx) => {
+    await ctx.reply('Нажмите кнопку ниже, если хотите добровольно передать номер организаторам клуба.', {
+      reply_markup: new Keyboard().requestContact('📱 Поделиться номером').resized().oneTime()
+    });
+  });
+
+  bot.on('message:contact', async (ctx) => {
+    const sender = ctx.from;
+    const contact = ctx.message.contact;
+    if (!sender || (contact.user_id && String(contact.user_id) !== String(sender.id))) {
+      await ctx.reply('Можно сохранить только ваш собственный номер.');
+      return;
+    }
+    const digits = contact.phone_number.replace(/\D/g, '');
+    if (digits.length < 7 || digits.length > 15) {
+      await ctx.reply('Telegram передал номер в неизвестном формате. Попробуйте ещё раз позже.');
+      return;
+    }
+    const phoneNumber = `+${digits}`;
+    const user = await prisma.user.findUnique({ where: { telegramId: BigInt(sender.id) } });
+    if (!user) {
+      await ctx.reply('Сначала откройте Mini App и войдите в клуб, затем повторите отправку номера.');
+      return;
+    }
+    try {
+      await prisma.$transaction(async (tx) => {
+        await tx.user.update({ where: { id: user.id }, data: { phoneNumber, phoneSharedAt: new Date() } });
+        await writeAudit(tx, {
+          actorId: user.id,
+          action: 'PHONE_SHARED',
+          entityType: 'User',
+          entityId: user.id,
+          summary: `${user.firstName} добровольно передал номер телефона`,
+          metadata: { source: 'telegram_contact' }
+        });
+      });
+      await ctx.reply('✅ Номер сохранён. Он доступен только администраторам клуба.', { reply_markup: { remove_keyboard: true } });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        await ctx.reply('Этот номер уже связан с другим аккаунтом клуба. Напишите администратору.', { reply_markup: { remove_keyboard: true } });
+        return;
+      }
+      throw error;
+    }
   });
 
   bot.catch((error) => console.error('Telegram bot error', error.error));

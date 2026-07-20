@@ -1,5 +1,7 @@
 const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:4000/api').replace(/\/$/, '');
 
+export function apiAssetUrl(path: string) { return `${API_URL}${path}`; }
+
 export class ApiError extends Error {
   constructor(message: string, public status: number) { super(message); }
 }

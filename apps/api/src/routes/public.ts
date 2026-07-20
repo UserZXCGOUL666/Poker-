@@ -6,6 +6,19 @@ import { cancelTournamentRegistration, registerForTournament } from '../services
 import { notifyUser, registrationNotification } from '../bot.js';
 
 export const publicRouter = Router();
+
+publicRouter.get('/branding/rating-banner', async (_req, res) => {
+  const settings = await prisma.clubSettings.findUnique({ where: { id: 'main' }, select: { ratingBannerImageData: true, updatedAt: true } });
+  const match = settings?.ratingBannerImageData?.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) return res.status(404).end();
+  const image = Buffer.from(match[2], 'base64');
+  res.setHeader('Content-Type', match[1]);
+  res.setHeader('Content-Length', image.length);
+  res.setHeader('Cache-Control', 'public, max-age=86400, immutable');
+  if (settings) res.setHeader('Last-Modified', settings.updatedAt.toUTCString());
+  return res.send(image);
+});
+
 publicRouter.use(requireAuth);
 
 const userSelect = { id: true, firstName: true, lastName: true, username: true, photoUrl: true, points: true } as const;
@@ -14,7 +27,7 @@ publicRouter.get('/home', async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: req.auth!.userId }, select: userSelect });
   if (!user) return res.status(404).json({ message: 'Пользователь не найден' });
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const [season, nextTournament, leaders, usersAhead, totalUsers, weeklyResult, finalTables, gamesPlayed] = await Promise.all([
+  const [season, nextTournament, leaders, usersAhead, totalUsers, weeklyResult, finalTables, gamesPlayed, branding, nextSeating] = await Promise.all([
     prisma.season.findFirst({ where: { isActive: true }, orderBy: { startsAt: 'desc' } }),
     prisma.tournament.findFirst({ where: { status: 'UPCOMING', startsAt: { gte: new Date() } }, orderBy: { startsAt: 'asc' } }),
     prisma.user.findMany({ orderBy: [{ points: 'desc' }, { createdAt: 'asc' }], take: 3, select: userSelect }),
@@ -22,7 +35,13 @@ publicRouter.get('/home', async (req, res) => {
     prisma.user.count(),
     prisma.pointTransaction.aggregate({ where: { userId: user.id, season: { isActive: true }, createdAt: { gte: weekAgo } }, _sum: { amount: true } }),
     prisma.tournamentResult.count({ where: { userId: user.id, isFinalTable: true, tournament: { season: { isActive: true } } } }),
-    prisma.tournamentResult.count({ where: { userId: user.id, tournament: { season: { isActive: true } } } })
+    prisma.tournamentResult.count({ where: { userId: user.id, tournament: { season: { isActive: true } } } }),
+    prisma.clubSettings.findUnique({ where: { id: 'main' }, select: { ratingBannerImageData: true, updatedAt: true } }),
+    prisma.tournamentSeat.findFirst({
+      where: { userId: user.id, tournament: { seatingPublishedAt: { not: null }, status: { in: ['UPCOMING', 'ACTIVE'] }, startsAt: { gte: new Date(Date.now() - 12 * 60 * 60 * 1000) } } },
+      orderBy: { tournament: { startsAt: 'asc' } },
+      select: { seatNumber: true, table: { select: { number: true } }, tournament: { select: { id: true, title: true, startsAt: true } } }
+    })
   ]);
   return res.json({
     season,
@@ -32,7 +51,9 @@ publicRouter.get('/home', async (req, res) => {
     weeklyPoints: weeklyResult._sum.amount ?? 0,
     finalTables,
     gamesPlayed,
-    leaders
+    leaders,
+    branding: { hasRatingBanner: Boolean(branding?.ratingBannerImageData), updatedAt: branding?.updatedAt ?? null },
+    nextSeating
   });
 });
 
@@ -109,6 +130,8 @@ publicRouter.get('/profile', async (req, res) => {
       telegramId: true,
       role: true,
       createdAt: true,
+      phoneNumber: true,
+      phoneSharedAt: true,
       results: { include: { tournament: true }, orderBy: { createdAt: 'desc' }, take: 10 },
       pointTransactions: {
         where: { season: { isActive: true } },
@@ -123,5 +146,12 @@ publicRouter.get('/profile', async (req, res) => {
   });
   if (!user) return res.status(404).json({ message: 'Пользователь не найден' });
   const rank = await prisma.user.count({ where: { points: { gt: user.points } } });
-  return res.json({ ...user, telegramId: user.telegramId.toString(), rank: rank + 1 });
+  return res.json({
+    ...user,
+    telegramId: user.telegramId.toString(),
+    phoneNumber: undefined,
+    hasPhoneNumber: Boolean(user.phoneNumber),
+    phoneNumberMasked: user.phoneNumber ? `${user.phoneNumber.slice(0, 4)}••••${user.phoneNumber.slice(-2)}` : null,
+    rank: rank + 1
+  });
 });

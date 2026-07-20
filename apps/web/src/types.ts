@@ -75,4 +75,6 @@ export type HomeData = {
   finalTables: number;
   gamesPlayed: number;
   leaders: Player[];
+  branding?: { hasRatingBanner: boolean; updatedAt: string | null };
+  nextSeating: { seatNumber: number; table: { number: number }; tournament: { id: string; title: string; startsAt: string } } | null;
 };

@@ -94,7 +94,7 @@ export async function updateRegistrationStatus(registrationId: string, status: T
       include: { tournament: true, user: { select: { id: true, telegramId: true, firstName: true, lastName: true, username: true } } }
     });
     if (!current) throw new AppError('Регистрация не найдена', 404, 'REGISTRATION_NOT_FOUND');
-    if (current.status === status) return { registration: current, user: current.user, promoted: null, tournament: current.tournament, duplicate: true };
+    if (current.status === status) return { registration: current, user: current.user, promoted: null, tournament: current.tournament, duplicate: true, previousStatus: current.status };
 
     if (occupiedStatuses.includes(status) && !occupiedStatuses.includes(current.status)) {
       const occupied = await tx.tournamentRegistration.count({ where: { tournamentId: current.tournamentId, status: { in: occupiedStatuses } } });
@@ -123,7 +123,7 @@ export async function updateRegistrationStatus(registrationId: string, status: T
       after: { status },
       metadata: { tournamentId: current.tournamentId, userId: current.userId }
     });
-    return { registration, user: current.user, promoted, tournament: current.tournament, duplicate: false };
+    return { registration, user: current.user, promoted, tournament: current.tournament, duplicate: false, previousStatus: current.status };
   });
 }
 
@@ -181,5 +181,11 @@ export function nextRegistrationStatus(occupied: number, capacity: number) {
 export function canPlayerCancelRegistration(tournamentStatus: string, registrationStatus: TournamentRegistrationStatus) {
   return tournamentStatus === 'UPCOMING' && (
     registrationStatus === TournamentRegistrationStatus.REGISTERED || registrationStatus === TournamentRegistrationStatus.WAITLISTED
+  );
+}
+
+export function shouldNotifyRegistrationStatusChange(previousStatus: TournamentRegistrationStatus | undefined, status: TournamentRegistrationStatus) {
+  return status === TournamentRegistrationStatus.CANCELLED || status === TournamentRegistrationStatus.WAITLISTED || (
+    status === TournamentRegistrationStatus.REGISTERED && previousStatus === TournamentRegistrationStatus.WAITLISTED
   );
 }

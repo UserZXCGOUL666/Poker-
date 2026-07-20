@@ -1,9 +1,9 @@
-import { ArrowRight, ChevronRight } from 'lucide-react';
+import { Armchair, ArrowRight, ChevronRight } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Avatar } from '../components/Avatar';
 import { ErrorState, Loading } from '../components/Loading';
-import { api } from '../lib/api';
+import { api, apiAssetUrl } from '../lib/api';
 import { points, tournamentDate } from '../lib/format';
 import type { HomeData } from '../types';
 
@@ -20,7 +20,7 @@ export function HomePage() {
   return <div className="page home-page">
     <p className="season-line">{data.season?.name ?? 'Новый сезон'} · Неделя {data.week}</p>
 
-    <section className="rating-hero">
+    <section className={`rating-hero ${data.branding?.hasRatingBanner ? 'rating-hero-custom' : ''}`} style={data.branding?.hasRatingBanner ? { backgroundImage: `linear-gradient(90deg, rgba(5, 37, 88, .94), rgba(7, 61, 145, .58)), url(${apiAssetUrl(`/branding/rating-banner?v=${encodeURIComponent(data.branding.updatedAt ?? '')}`)})` } : undefined}>
       <div className="rating-watermark">♠</div>
       <div className="rating-top">
         <div><span>Ваш рейтинг</span><div className="rank-number">#{data.user.rank}<small>из {data.user.totalUsers}</small></div></div>
@@ -29,6 +29,8 @@ export function HomePage() {
       <div className="rating-points"><strong>{points(data.user.points)} PTS</strong><span>{points(target)} PTS</span></div>
       <div className="progress"><i style={{ width: `${progress}%` }} /></div>
     </section>
+
+    {data.nextSeating && <section className="my-seat-card card"><span><Armchair /></span><div><small>ВАША РАССАДКА · {data.nextSeating.tournament.title}</small><strong>Стол №{data.nextSeating.table.number} <i>·</i> Место №{data.nextSeating.seatNumber}</strong></div><Link to="/games"><ChevronRight /></Link></section>}
 
     <div className="section-title"><h2>Следующая игра</h2><Link to="/games">Все игры</Link></div>
     {data.nextTournament && next ? (

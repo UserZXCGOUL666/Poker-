@@ -1,23 +1,26 @@
 import {
   ArrowDown, ArrowLeft, ArrowUp, Bell, CalendarDays, CalendarPlus, CheckCircle2, ChevronRight,
-  CircleAlert, Coins, Copy, Edit3, FileStack, Filter, History, KeyRound, LayoutDashboard,
+  Armchair, CircleAlert, ClipboardCheck, Coins, Copy, Edit3, Eye, EyeOff, FileStack, Filter, History, ImagePlus, KeyRound, LayoutDashboard,
   ListChecks, LogOut, Medal, MonitorSmartphone, NotebookPen, Plus, RefreshCw, RotateCcw, Save,
-  Search, Settings, ShieldCheck, ShieldOff, Spade, Tags, Trash2, Trophy, UserCheck, UserRound,
-  Users, X, MoreHorizontal
+  Search, Settings, ShieldCheck, ShieldOff, Shuffle, Spade, Tags, Trash2, Trophy, UserCheck, UserMinus, UserRound, Play,
+  Users, X, MoreHorizontal, Phone
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Avatar } from '../components/Avatar';
 import { ErrorState, Loading } from '../components/Loading';
 import { useAuth } from '../contexts/AuthContext';
 import { api, post } from '../lib/api';
+import { deriveAdminWorkflow, type AdminFocusTournament } from '../lib/adminWorkflow';
 import { points, tournamentDate } from '../lib/format';
 import type { PlayerTag, PointTransaction, Season, Tournament, TournamentRegistrationStatus, User } from '../types';
 
-type AdminSection = 'overview' | 'players' | 'tournaments' | 'audit' | 'access' | 'settings' | 'more';
-type AdminIntentKind = 'points' | 'newTournament' | 'results' | 'invite' | 'openTournament';
+type AdminSection = 'overview' | 'players' | 'tournaments' | 'seating' | 'audit' | 'access' | 'settings' | 'more';
+type AdminIntentKind = 'points' | 'newTournament' | 'results' | 'participants' | 'invite' | 'openTournament' | 'seating';
 type AdminIntent = { kind: AdminIntentKind; nonce: number; targetId?: string } | null;
 type AdminUser = Pick<User, 'id' | 'telegramId' | 'firstName' | 'lastName' | 'username' | 'role' | 'points'> & {
+  phoneNumber: string | null;
+  phoneSharedAt: string | null;
   tags: PlayerTag[];
   lastPlayedAt: string | null;
   _count?: { results: number; browserSessions: number; registrations: number };
@@ -45,6 +48,7 @@ type Overview = {
   activeBrowserSessions: number;
   activeSeason: Season | null;
   nextTournament: Tournament | null;
+  focusTournament: AdminFocusTournament | null;
   recentTournaments: (Tournament & { _count: { results: number; notifications: number; registrations: number } })[];
   recentPointTransactions: AdminPointTransaction[];
   alerts: { id: string; severity: 'critical' | 'warning' | 'info'; title: string; text: string; section: AdminSection; targetId?: string }[];
@@ -62,23 +66,34 @@ type TournamentDetails = Tournament & {
   registrations: Registration[];
   pointBatches: PointBatch[];
 };
+type SeatingPlayer = Pick<User, 'id' | 'firstName' | 'lastName' | 'username' | 'photoUrl'>;
+type SeatingData = {
+  tournament: Pick<Tournament, 'id' | 'title' | 'startsAt' | 'status'> & { seatingPublishedAt: string | null; seatingVersion: number };
+  tables: { id: string; number: number; capacity: number; seats: { id: string; userId: string; seatNumber: number; user: SeatingPlayer }[] }[];
+  registrations: { id: string; userId: string; status: TournamentRegistrationStatus; user: SeatingPlayer }[];
+  unseated: { id: string; userId: string; status: TournamentRegistrationStatus; user: SeatingPlayer }[];
+  eligibleCount: number;
+  seatedCount: number;
+};
+type BrandingSettings = { ratingBannerImageData: string | null; updatedAt: string | null };
 
 const desktopSections = [
-  { id: 'overview' as const, label: 'Обзор', icon: LayoutDashboard },
+  { id: 'overview' as const, label: 'Сегодня', icon: LayoutDashboard },
   { id: 'players' as const, label: 'Игроки', icon: Users },
   { id: 'tournaments' as const, label: 'Турниры', icon: CalendarDays },
+  { id: 'seating' as const, label: 'Рассадка', icon: Armchair },
   { id: 'audit' as const, label: 'Аудит', icon: History },
   { id: 'access' as const, label: 'Доступ', icon: KeyRound },
   { id: 'settings' as const, label: 'Настройки', icon: Settings }
 ];
 const mobileSections = [
-  { id: 'overview' as const, label: 'Обзор', icon: LayoutDashboard },
+  { id: 'overview' as const, label: 'Сегодня', icon: LayoutDashboard },
   { id: 'players' as const, label: 'Игроки', icon: Users },
   { id: 'tournaments' as const, label: 'Турниры', icon: CalendarDays },
   { id: 'more' as const, label: 'Ещё', icon: MoreHorizontal }
 ];
 const sectionTitles: Record<AdminSection, string> = {
-  overview: 'Обзор клуба', players: 'Игроки', tournaments: 'Турниры', audit: 'Аудит', access: 'Безопасность', settings: 'Настройки', more: 'Ещё'
+  overview: 'Сегодня', players: 'Игроки', tournaments: 'Турниры', seating: 'Рассадка', audit: 'Аудит', access: 'Безопасность', settings: 'Настройки', more: 'Ещё'
 };
 
 export function AdminPage() {
@@ -92,28 +107,47 @@ export function AdminPage() {
   const [tags, setTags] = useState<PlayerTag[]>([]);
   const [reasonPresets, setReasonPresets] = useState<ReasonPreset[]>([]);
   const [templates, setTemplates] = useState<TournamentTemplate[]>([]);
+  const [loadedSections, setLoadedSections] = useState<Partial<Record<AdminSection, boolean>>>({});
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const loadOverview = useCallback(async () => {
     try {
-      const [overviewData, seasonsData, tournamentsData, usersData, tagsData, reasonsData, templatesData] = await Promise.all([
-        api<Overview>('/admin/overview'), api<Season[]>('/admin/seasons'), api<Tournament[]>('/tournaments'), api<AdminUser[]>('/admin/users'),
-        api<PlayerTag[]>('/admin/tags'), api<ReasonPreset[]>('/admin/reason-presets'), api<TournamentTemplate[]>('/admin/tournament-templates')
-      ]);
-      setOverview(overviewData);
-      setSeasons(seasonsData);
-      setTournaments(tournamentsData);
-      setUsers(usersData);
-      setTags(tagsData);
-      setReasonPresets(reasonsData);
-      setTemplates(templatesData);
+      setOverview(await api<Overview>('/admin/overview'));
       setError(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Не удалось загрузить админку');
     }
   }, []);
-  useEffect(() => { void load(); }, [load]);
+
+  const loadSectionData = useCallback(async (target: AdminSection) => {
+    try {
+      if (target === 'players') {
+        const [usersData, tagsData, reasonsData] = await Promise.all([api<AdminUser[]>('/admin/users'), api<PlayerTag[]>('/admin/tags'), api<ReasonPreset[]>('/admin/reason-presets')]);
+        setUsers(usersData); setTags(tagsData); setReasonPresets(reasonsData);
+      } else if (target === 'tournaments') {
+        const [seasonsData, tournamentsData, usersData, templatesData] = await Promise.all([api<Season[]>('/admin/seasons'), api<Tournament[]>('/tournaments'), api<AdminUser[]>('/admin/users'), api<TournamentTemplate[]>('/admin/tournament-templates')]);
+        setSeasons(seasonsData); setTournaments(tournamentsData); setUsers(usersData); setTemplates(templatesData);
+      } else if (target === 'seating') {
+        setTournaments(await api<Tournament[]>('/tournaments'));
+      } else if (target === 'access') {
+        setUsers(await api<AdminUser[]>('/admin/users'));
+      } else if (target === 'settings') {
+        const [seasonsData, tagsData, reasonsData] = await Promise.all([api<Season[]>('/admin/seasons'), api<PlayerTag[]>('/admin/tags'), api<ReasonPreset[]>('/admin/reason-presets')]);
+        setSeasons(seasonsData); setTags(tagsData); setReasonPresets(reasonsData);
+      }
+      setLoadedSections((current) => ({ ...current, [target]: true }));
+      setError(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Не удалось загрузить раздел админки');
+    }
+  }, []);
+
+  useEffect(() => { void loadOverview(); }, [loadOverview]);
+  useEffect(() => {
+    if (section === 'overview' || section === 'audit' || section === 'more' || loadedSections[section]) return;
+    void loadSectionData(section);
+  }, [section, loadedSections, loadSectionData]);
 
   function navigate(next: AdminSection, kind?: AdminIntentKind, targetId?: string) {
     setSection(next);
@@ -122,13 +156,15 @@ export function AdminPage() {
   function done(message: string) {
     setNotice(message);
     window.setTimeout(() => setNotice(null), 3500);
-    void load();
+    void loadOverview();
+    if (section !== 'overview' && section !== 'audit' && section !== 'more') void loadSectionData(section);
   }
 
   if (error) return <div className="admin-shell"><ErrorState message={error} /></div>;
   if (!overview) return <div className="admin-shell"><Loading label="Открываем админку…" /></div>;
 
-  const moreActive = section === 'more' || section === 'audit' || section === 'access' || section === 'settings';
+  const moreActive = section === 'more' || section === 'seating' || section === 'audit' || section === 'access' || section === 'settings';
+  const sectionReady = section === 'overview' || section === 'audit' || section === 'more' || Boolean(loadedSections[section]);
   return <div className="admin-shell">
     <aside className="admin-sidebar">
       <div className="admin-brand"><span><Spade size={21} fill="currentColor" /></span><div><strong>POKER CLUB</strong><small>Панель управления</small></div></div>
@@ -139,12 +175,14 @@ export function AdminPage() {
     <main className="admin-main">
       <header className="admin-mobile-head"><Link to="/"><ArrowLeft /></Link><strong>{sectionTitles[section]}</strong><ShieldCheck /></header>
       {notice && <div className="toast"><CheckCircle2 size={18} />{notice}</div>}
-      {section === 'overview' && <OverviewTab data={overview} onNavigate={navigate} />}
-      {section === 'players' && <PlayersTab users={users} tags={tags} reasonPresets={reasonPresets} intent={intent} onDone={done} />}
-      {section === 'tournaments' && <TournamentsTab seasons={seasons} tournaments={tournaments} users={users} templates={templates} intent={intent} onDone={done} />}
+      {section === 'overview' && <OverviewTab data={overview} onNavigate={navigate} onDone={done} />}
+      {!sectionReady && <div className="admin-view"><Loading label="Загружаем раздел…" /></div>}
+      {section === 'players' && sectionReady && <PlayersTab users={users} tags={tags} reasonPresets={reasonPresets} intent={intent} onDone={done} />}
+      {section === 'tournaments' && sectionReady && <TournamentsTab seasons={seasons} tournaments={tournaments} users={users} templates={templates} intent={intent} onDone={done} />}
+      {section === 'seating' && sectionReady && <SeatingTab tournaments={tournaments} intent={intent} onDone={done} />}
       {section === 'audit' && <AuditTab />}
-      {section === 'access' && <AccessTab users={users} onDone={done} />}
-      {section === 'settings' && <SettingsTab seasons={seasons} tags={tags} reasonPresets={reasonPresets} onDone={done} />}
+      {section === 'access' && sectionReady && <AccessTab users={users} onDone={done} />}
+      {section === 'settings' && sectionReady && <SettingsTab seasons={seasons} tags={tags} reasonPresets={reasonPresets} onDone={done} />}
       {section === 'more' && <MoreTab onNavigate={navigate} />}
       <nav className="admin-mobile-tabs">{mobileSections.map(({ id, label, icon: Icon }) => {
         const active = id === 'more' ? moreActive : section === id;
@@ -158,11 +196,12 @@ function AdminHeading({ eyebrow, title, text, actions }: { eyebrow: string; titl
   return <div className="admin-heading-row"><div className="admin-heading"><span>{eyebrow}</span><h1>{title}</h1><p>{text}</p></div>{actions && <div className="admin-heading-actions">{actions}</div>}</div>;
 }
 
-function OverviewTab({ data, onNavigate }: { data: Overview; onNavigate: (section: AdminSection, kind?: AdminIntentKind, targetId?: string) => void }) {
+function OverviewTab({ data, onNavigate, onDone }: { data: Overview; onNavigate: (section: AdminSection, kind?: AdminIntentKind, targetId?: string) => void; onDone: (message: string) => void }) {
   return <div className="admin-view">
-    <AdminHeading eyebrow="ПАНЕЛЬ УПРАВЛЕНИЯ" title="Добрый день!" text="Всё важное по клубу на одном экране" />
+    <AdminHeading eyebrow="ОПЕРАЦИОННЫЙ ЦЕНТР" title="Сегодня" text="Один экран ведёт администратора от заявок до начисления очков" />
+    {data.focusTournament ? <TournamentCommandCenter tournament={data.focusTournament} onNavigate={onNavigate} onDone={onDone} /> : <section className="today-empty"><span><CalendarPlus /></span><div><h2>Нет турнира для работы</h2><p>Создайте игру из шаблона — после этого здесь появится следующий шаг.</p></div><button className="button primary" onClick={() => onNavigate('tournaments', 'newTournament')}><Plus size={16} />Создать турнир</button></section>}
     {data.alerts.length > 0 && <section className="smart-alerts" aria-label="Требует внимания">
-      <div className="admin-section-title"><div><h2>Требует внимания</h2><p>Проверки клуба в реальном времени</p></div><span>{data.alerts.length}</span></div>
+      <div className="admin-section-title"><div><h2>Исключения</h2><p>Только то, что требует решения администратора</p></div><span>{data.alerts.length}</span></div>
       <div>{data.alerts.map((alert) => <button className={`smart-alert ${alert.severity}`} key={alert.id} onClick={() => onNavigate(alert.section, alert.targetId ? 'openTournament' : undefined, alert.targetId)}><CircleAlert /><div><strong>{alert.title}</strong><small>{alert.text}</small></div><ChevronRight /></button>)}</div>
     </section>}
     <div className="admin-stat-grid admin-stat-grid-four">
@@ -177,6 +216,7 @@ function OverviewTab({ data, onNavigate }: { data: Overview; onNavigate: (sectio
         <button onClick={() => onNavigate('players', 'points')}><span><Coins /></span><div><strong>Изменить очки</strong><small>Начислить или списать</small></div><ChevronRight /></button>
         <button onClick={() => onNavigate('tournaments', 'newTournament')}><span><CalendarPlus /></span><div><strong>Создать турнир</strong><small>Добавить игру в расписание</small></div><ChevronRight /></button>
         <button onClick={() => onNavigate('tournaments', 'results')}><span><Medal /></span><div><strong>Внести результаты</strong><small>Расставить игроков по местам</small></div><ChevronRight /></button>
+        <button onClick={() => onNavigate('seating', 'seating')}><span><Armchair /></span><div><strong>Рассадить игроков</strong><small>Столы, места и публикация</small></div><ChevronRight /></button>
         <button onClick={() => onNavigate('access', 'invite')}><span><KeyRound /></span><div><strong>Выдать доступ</strong><small>Создать браузерную ссылку</small></div><ChevronRight /></button>
       </div>
     </section>
@@ -191,6 +231,117 @@ function OverviewTab({ data, onNavigate }: { data: Overview; onNavigate: (sectio
       </section>
     </div>
   </div>;
+}
+
+function TournamentCommandCenter({ tournament, onNavigate, onDone }: {
+  tournament: AdminFocusTournament;
+  onNavigate: (section: AdminSection, kind?: AdminIntentKind, targetId?: string) => void;
+  onDone: (message: string) => void;
+}) {
+  const workflow = deriveAdminWorkflow(tournament);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [checkInOpen, setCheckInOpen] = useState(false);
+  const activePlayers = tournament.registrationCounts.registered + tournament.registrationCounts.checked_in + tournament.registrationCounts.played;
+  const checkedIn = tournament.registrationCounts.checked_in + tournament.registrationCounts.played;
+
+  async function notifyPlayers() {
+    setSaving(true); setError(null);
+    try {
+      const result = await post<{ sentCount: number; failedCount: number }>(`/admin/tournaments/${tournament.id}/notify`);
+      onDone(`Напоминание отправлено: ${result.sentCount}, ошибок: ${result.failedCount}`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось отправить напоминание'); }
+    finally { setSaving(false); }
+  }
+
+  async function startTournament() {
+    if (!window.confirm(`Начать «${tournament.title}» и закрыть регистрацию?\n\nПришли: ${checkedIn}. Рассадка опубликована: да.`)) return;
+    setSaving(true); setError(null);
+    try {
+      await post(`/admin/tournaments/${tournament.id}`, { status: 'ACTIVE', registrationClosed: true }, 'PATCH');
+      onDone('Турнир запущен, регистрация закрыта');
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось начать турнир'); }
+    finally { setSaving(false); }
+  }
+
+  function primaryAction() {
+    if (workflow.stage === 'CHECK_IN') return setCheckInOpen(true);
+    if (workflow.stage === 'SEATING' || workflow.stage === 'PUBLISH') return onNavigate('seating', 'seating', tournament.id);
+    if (workflow.stage === 'START') return void startTournament();
+    if (workflow.stage === 'RESULTS' || workflow.stage === 'POINTS') return onNavigate('tournaments', 'results', tournament.id);
+    if (workflow.stage === 'DONE') return onNavigate('tournaments', 'openTournament', tournament.id);
+    return onNavigate('tournaments', 'participants', tournament.id);
+  }
+
+  return <section className="tournament-command-center">
+    <header className="command-head">
+      <div className="command-date"><strong>{tournamentDate(tournament.startsAt).day}</strong><span>{tournamentDate(tournament.startsAt).month}</span></div>
+      <div className="command-title"><span>{tournament.season.name} · {tournamentDate(tournament.startsAt).full}</span><h2>{tournament.title}</h2><p>{tournament.location || 'Место не указано'}</p></div>
+      <Status value={tournament.status} />
+    </header>
+    <ol className="workflow-steps" aria-label={`Выполнено этапов: ${workflow.completedSteps} из ${workflow.steps.length}`}>
+      {workflow.steps.map((step, index) => <li key={step.id} className={step.state}><span>{step.state === 'done' ? <CheckCircle2 /> : index + 1}</span><small>{step.label}</small></li>)}
+    </ol>
+    <div className="command-body">
+      <div className="next-admin-action">
+        <span className={`stage-icon stage-${workflow.stage.toLowerCase()}`}>{workflow.stage === 'CHECK_IN' ? <ClipboardCheck /> : workflow.stage === 'SEATING' || workflow.stage === 'PUBLISH' ? <Armchair /> : workflow.stage === 'START' ? <Play /> : workflow.stage === 'RESULTS' || workflow.stage === 'POINTS' ? <Medal /> : <CheckCircle2 />}</span>
+        <div><small>СЛЕДУЮЩИЙ ШАГ</small><h3>{workflow.title}</h3><p>{workflow.hint}</p></div>
+      </div>
+      <div className="command-metrics">
+        <article><span>Заявки</span><strong>{activePlayers}<small> / {tournament.capacity}</small></strong></article>
+        <article><span>Пришли</span><strong>{checkedIn}</strong></article>
+        <article><span>Рассажены</span><strong>{tournament._count.seats}</strong></article>
+        <article><span>Очки</span><strong>{tournament._count.pointBatches ? 'Готово' : 'Нет'}</strong></article>
+      </div>
+    </div>
+    {error && <div className="form-error command-error">{error}</div>}
+    <footer className="command-actions">
+      <button className="button primary command-primary" disabled={saving} onClick={primaryAction}>{workflow.stage === 'START' ? <Play size={17} /> : workflow.stage === 'CHECK_IN' ? <ClipboardCheck size={17} /> : workflow.stage === 'SEATING' || workflow.stage === 'PUBLISH' ? <Armchair size={17} /> : workflow.stage === 'RESULTS' || workflow.stage === 'POINTS' ? <Medal size={17} /> : <ChevronRight size={17} />}{saving ? 'Выполняем…' : workflow.action}</button>
+      {tournament.status === 'UPCOMING' && <button className="button secondary" disabled={saving} onClick={() => void notifyPlayers()}><Bell size={16} />{tournament._count.notifications ? 'Повторить напоминание' : 'Напомнить игрокам'}</button>}
+      <button className="button ghost" onClick={() => onNavigate('tournaments', 'openTournament', tournament.id)}>Все параметры <ChevronRight size={15} /></button>
+    </footer>
+    {checkInOpen && <CheckInModal tournamentId={tournament.id} onClose={(changed) => { setCheckInOpen(false); if (changed) onDone('Чек-ин обновлён'); }} />}
+  </section>;
+}
+
+function CheckInModal({ tournamentId, onClose }: { tournamentId: string; onClose: (changed: boolean) => void }) {
+  const [details, setDetails] = useState<TournamentDetails | null>(null);
+  const [query, setQuery] = useState('');
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [changed, setChanged] = useState(false);
+  const load = useCallback(async () => {
+    try { setDetails(await api<TournamentDetails>(`/admin/tournaments/${encodeURIComponent(tournamentId)}`)); setError(null); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось открыть чек-ин'); }
+  }, [tournamentId]);
+  useEffect(() => { void load(); }, [load]);
+  const registrations = (details?.registrations ?? []).filter((registration) => ['REGISTERED', 'CHECKED_IN', 'PLAYED'].includes(registration.status) && playerLabel(registration.user).toLowerCase().includes(query.toLowerCase()));
+  const present = details?.registrations.filter((registration) => registration.status === 'CHECKED_IN' || registration.status === 'PLAYED').length ?? 0;
+
+  async function toggle(registration: Registration) {
+    if (registration.status === 'PLAYED') return;
+    setSavingId(registration.id); setError(null);
+    const nextStatus = registration.status === 'CHECKED_IN' ? 'REGISTERED' : 'CHECKED_IN';
+    try {
+      await post(`/admin/registrations/${registration.id}`, { status: nextStatus }, 'PATCH');
+      await load();
+      setChanged(true);
+      setNotice(nextStatus === 'CHECKED_IN' ? `${playerLabel(registration.user)}: присутствие подтверждено` : `${playerLabel(registration.user)}: отметка снята`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось изменить отметку'); }
+    finally { setSavingId(null); }
+  }
+
+  return <Modal title="Быстрый чек-ин" onClose={() => onClose(changed)}><div className="checkin-panel">
+    <div className="checkin-summary"><span><ClipboardCheck /></span><div><strong>{present} пришли</strong><small>из {details?.participantCount ?? 0} участников основного списка</small></div></div>
+    <div className="players-search"><Search size={16} /><input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Имя или @username" /></div>
+    {notice && <div className="checkin-inline-notice"><CheckCircle2 size={15} />{notice}</div>}
+    {error && <div className="form-error">{error}</div>}
+    {!details ? <Loading label="Загружаем список…" /> : <div className="checkin-list">{registrations.map((registration) => {
+      const isPresent = registration.status === 'CHECKED_IN' || registration.status === 'PLAYED';
+      return <button key={registration.id} className={isPresent ? 'present' : ''} disabled={savingId === registration.id || registration.status === 'PLAYED'} onClick={() => void toggle(registration)}><Avatar firstName={registration.user.firstName} lastName={registration.user.lastName} size="sm" /><span><strong>{playerLabel(registration.user)}</strong><small>{registration.status === 'PLAYED' ? 'Участие зафиксировано' : isPresent ? 'Пришёл' : 'Ожидаем'}</small></span><i>{isPresent ? <CheckCircle2 /> : 'Отметить'}</i></button>})}{!registrations.length && <Empty icon={<Users />} title="Никого не найдено" text="Проверьте строку поиска" />}</div>}
+    <div className="checkin-note"><ShieldCheck size={15} /><span>Отметка каждого игрока обратима и записывается в аудит. Массового чек-ина нет, чтобы случайно не посадить отсутствующих.</span></div>
+  </div></Modal>;
 }
 
 function PlayersTab({ users, tags, reasonPresets, intent, onDone }: { users: AdminUser[]; tags: PlayerTag[]; reasonPresets: ReasonPreset[]; intent: AdminIntent; onDone: (message: string) => void }) {
@@ -238,7 +389,7 @@ function PlayersTab({ users, tags, reasonPresets, intent, onDone }: { users: Adm
   }, [intent?.nonce, intent?.kind]);
 
   const filtered = users.filter((item) => {
-    const matchesSearch = `${item.firstName} ${item.lastName ?? ''} ${item.username ?? ''} ${item.telegramId}`.toLowerCase().includes(query.toLowerCase());
+    const matchesSearch = `${item.firstName} ${item.lastName ?? ''} ${item.username ?? ''} ${item.telegramId} ${item.phoneNumber ?? ''}`.toLowerCase().includes(query.toLowerCase());
     const matchesTag = !tagFilter || item.tags.some((tag) => tag.id === tagFilter);
     const lastPlayed = item.lastPlayedAt ? new Date(item.lastPlayedAt).getTime() : 0;
     const matchesActivity = activityFilter === 'all' || (activityFilter === 'never' ? !lastPlayed : lastPlayed >= Date.now() - 30 * 86_400_000);
@@ -313,7 +464,7 @@ function PlayersTab({ users, tags, reasonPresets, intent, onDone }: { users: Adm
     <AdminHeading eyebrow="УЧАСТНИКИ КЛУБА" title="Игроки" text="Баланс, история и доступ конкретного пользователя в одной карточке" />
     <div className="players-workspace">
       <aside className="players-panel">
-        <div className="players-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Имя, username или Telegram ID" /><button className={filtersOpen ? 'active' : ''} onClick={() => setFiltersOpen(!filtersOpen)} aria-label="Расширенные фильтры"><Filter size={15} /></button></div>
+        <div className="players-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Имя, username, телефон или ID" /><button className={filtersOpen ? 'active' : ''} onClick={() => setFiltersOpen(!filtersOpen)} aria-label="Расширенные фильтры"><Filter size={15} /></button></div>
         {filtersOpen && <div className="advanced-player-filters">
           <label>Тег<select value={tagFilter} onChange={(event) => setTagFilter(event.target.value)}><option value="">Все теги</option>{tags.map((tag) => <option key={tag.id} value={tag.id}>{tag.name}</option>)}</select></label>
           <label>Активность<select value={activityFilter} onChange={(event) => setActivityFilter(event.target.value as typeof activityFilter)}><option value="all">Любая</option><option value="active30">Играл за 30 дней</option><option value="never">Без игр</option></select></label>
@@ -322,12 +473,12 @@ function PlayersTab({ users, tags, reasonPresets, intent, onDone }: { users: Adm
           <button onClick={() => { setTagFilter(''); setActivityFilter('all'); setAccessFilter('all'); setMinPoints(''); }}><RotateCcw size={13} />Сбросить</button>
         </div>}
         <div className="players-count">Найдено: {filtered.length}</div>
-        <div className="players-list">{filtered.map((item, index) => <button key={item.id} className={selectedId === item.id ? 'active' : ''} onClick={() => setSelectedId(item.id)}><span className="player-rank">#{users.indexOf(item) + 1 || index + 1}</span><Avatar firstName={item.firstName} lastName={item.lastName} size="sm" /><div><strong>{item.username ? `@${item.username}` : `${item.firstName} ${item.lastName ?? ''}`}</strong><small>ID {item.telegramId} · {item._count?.results ?? 0} игр</small><span className="mini-tags">{item.tags.slice(0, 2).map((tag) => <i key={tag.id} style={{ '--tag-color': tag.color } as CSSProperties}>{tag.name}</i>)}</span></div><b>{points(item.points)}<small> PTS</small></b></button>)}{!filtered.length && <Empty icon={<Search />} title="Игроки не найдены" text="Попробуйте другой запрос или сбросьте фильтры" />}</div>
+        <div className="players-list">{filtered.map((item, index) => <button key={item.id} className={selectedId === item.id ? 'active' : ''} onClick={() => setSelectedId(item.id)}><span className="player-rank">#{users.indexOf(item) + 1 || index + 1}</span><Avatar firstName={item.firstName} lastName={item.lastName} size="sm" /><div><strong>{item.username ? `@${item.username}` : `${item.firstName} ${item.lastName ?? ''}`}</strong><small>{item.phoneNumber ? `☎ ${item.phoneNumber}` : `ID ${item.telegramId}`} · {item._count?.results ?? 0} игр</small><span className="mini-tags">{item.tags.slice(0, 2).map((tag) => <i key={tag.id} style={{ '--tag-color': tag.color } as CSSProperties}>{tag.name}</i>)}</span></div><b>{points(item.points)}<small> PTS</small></b></button>)}{!filtered.length && <Empty icon={<Search />} title="Игроки не найдены" text="Попробуйте другой запрос или сбросьте фильтры" />}</div>
       </aside>
       <section className="player-detail">
         {formError && !detail && !loading && <div className="form-error">{formError}</div>}
         {loading && !detail ? <Loading label="Открываем карточку…" /> : detail ? <>
-          <header className="player-detail-head"><Avatar firstName={detail.firstName} lastName={detail.lastName} photoUrl={detail.photoUrl} size="lg" /><div><span>{detail.role === 'ADMIN' ? 'АДМИНИСТРАТОР' : 'ИГРОК'}</span><h2>{detail.firstName} {detail.lastName ?? ''}</h2><p>@{detail.username || 'player'} · Telegram ID {detail.telegramId}</p></div><strong>{points(detail.points)}<small> PTS</small></strong></header>
+          <header className="player-detail-head"><Avatar firstName={detail.firstName} lastName={detail.lastName} photoUrl={detail.photoUrl} size="lg" /><div><span>{detail.role === 'ADMIN' ? 'АДМИНИСТРАТОР' : 'ИГРОК'}</span><h2>{detail.firstName} {detail.lastName ?? ''}</h2><p>@{detail.username || 'player'} · Telegram ID {detail.telegramId}{detail.phoneNumber ? ` · ${detail.phoneNumber}` : ' · телефон не передан'}</p></div><strong>{points(detail.points)}<small> PTS</small></strong></header>
           <div className="player-detail-tabs"><button className={detailTab === 'balance' ? 'active' : ''} onClick={() => setDetailTab('balance')}><Coins />Баланс</button><button className={detailTab === 'history' ? 'active' : ''} onClick={() => setDetailTab('history')}><Medal />История</button><button className={detailTab === 'notes' ? 'active' : ''} onClick={() => setDetailTab('notes')}><NotebookPen />Заметки</button><button className={detailTab === 'access' ? 'active' : ''} onClick={() => setDetailTab('access')}><KeyRound />Доступ</button></div>
           {detailTab === 'balance' && <form className="player-points-editor" onSubmit={changePoints}>
             <div className="point-mode"><button type="button" className={mode === 'award' ? 'active award' : ''} onClick={() => setMode('award')}>+ Начислить</button><button type="button" className={mode === 'deduct' ? 'active deduct' : ''} onClick={() => setMode('deduct')}>− Списать</button></div>
@@ -384,7 +535,8 @@ function TournamentsTab({ seasons, tournaments, users, templates, intent, onDone
   useEffect(() => { setFormError(null); void loadDetail(selectedId, true); }, [selectedId, loadDetail]);
   useEffect(() => {
     if (intent?.kind === 'newTournament') { setFormError(null); setCreateOpen(true); }
-    if (intent?.kind === 'results') setView('results');
+    if (intent?.kind === 'results') { if (intent.targetId) setSelectedId(intent.targetId); setView('results'); }
+    if (intent?.kind === 'participants') { if (intent.targetId) setSelectedId(intent.targetId); setView('participants'); }
     if (intent?.kind === 'openTournament' && intent.targetId) { setSelectedId(intent.targetId); setView('details'); }
   }, [intent?.nonce, intent?.kind, intent?.targetId]);
 
@@ -460,7 +612,7 @@ function TournamentsTab({ seasons, tournaments, users, templates, intent, onDone
           <button className="button primary wide" disabled={saving}><Save size={17} />{saving ? 'Сохраняем…' : 'Сохранить изменения'}</button>
         </form>}
         {view === 'participants' && <ParticipantsEditor details={detail} users={users} selectedId={registrationUserId} setSelectedId={setRegistrationUserId} saving={saving} error={formError} onAdd={addRegistration} onStatus={setRegistrationStatus} />}
-        {view === 'results' && <ResultsEditor details={detail} users={users} onDone={onDone} onSaved={async () => { await loadDetail(detail.id); onDone('Места игроков сохранены'); }} />}
+        {view === 'results' && <ResultsEditor key={detail.id} details={detail} users={users} onDone={onDone} onSaved={async () => { await loadDetail(detail.id); }} />}
       </> : <Empty icon={<CalendarDays />} title="Выберите турнир" text="Информация откроется справа" />}</section>
     </div>
     {createOpen && <Modal title="Новый турнир" onClose={() => { setCreateOpen(false); setTemplateDefault(null); setFormError(null); }}><form key={templateDefault?.id ?? 'blank'} className="admin-form" onSubmit={createTournament}>
@@ -544,17 +696,67 @@ function ResultsEditor({ details, users, onSaved, onDone }: { details: Tournamen
   const [error, setError] = useState<string | null>(null);
   const [scores, setScores] = useState<Record<string, string>>({});
   const [batchKey, setBatchKey] = useState(() => crypto.randomUUID());
+  const [eliminationMode, setEliminationMode] = useState(false);
+  const [eliminatedCount, setEliminatedCount] = useState(0);
+  const [draftReady, setDraftReady] = useState(false);
+  const draftKey = `poker-results-draft:${details.id}`;
   useEffect(() => {
-    const next = details.results.map((result) => users.find((user) => user.id === result.userId)).filter((user): user is AdminUser => Boolean(user));
+    let next = details.results.map((result) => users.find((user) => user.id === result.userId)).filter((user): user is AdminUser => Boolean(user));
+    let restoredEliminated = 0;
+    let restoredScores: Record<string, string> | null = null;
+    if (!details.results.length) {
+      try {
+        const draft = JSON.parse(localStorage.getItem(draftKey) ?? 'null') as { ids?: string[]; eliminatedCount?: number; scores?: Record<string, string> } | null;
+        if (draft?.ids?.length) {
+          const restored = draft.ids.map((id) => users.find((user) => user.id === id)).filter((user): user is AdminUser => Boolean(user));
+          if (restored.length === draft.ids.length) {
+            next = restored;
+            restoredEliminated = Math.min(Number(draft.eliminatedCount) || 0, Math.max(0, restored.length - 1));
+            restoredScores = draft.scores ?? null;
+          }
+        }
+      } catch { localStorage.removeItem(draftKey); }
+    } else {
+      localStorage.removeItem(draftKey);
+    }
     setEntries(next);
-    setScores(Object.fromEntries(next.map((user, index) => [user.id, String([500, 350, 250, 150, 100][index] ?? 50)])));
-  }, [details.id, details.results, users]);
+    setEliminatedCount(restoredEliminated);
+    setScores(Object.fromEntries(next.map((user, index) => [user.id, restoredScores?.[user.id] ?? String(defaultTournamentScore(index))])));
+    setDraftReady(true);
+  }, [details.id, details.results, users, draftKey]);
+  useEffect(() => {
+    if (!draftReady || details.results.length) return;
+    if (entries.length) localStorage.setItem(draftKey, JSON.stringify({ ids: entries.map((entry) => entry.id), eliminatedCount, scores }));
+    else localStorage.removeItem(draftKey);
+  }, [details.results.length, draftKey, draftReady, eliminatedCount, entries, scores]);
   const available = useMemo(() => users.filter((user) => !entries.some((entry) => entry.id === user.id)), [users, entries]);
+  const arrivals = useMemo(() => details.registrations
+    .filter((registration) => registration.status === 'CHECKED_IN' || registration.status === 'PLAYED')
+    .map((registration) => users.find((user) => user.id === registration.user.id))
+    .filter((user): user is AdminUser => Boolean(user)), [details.registrations, users]);
   const placesSaved = details.results.length === entries.length && details.results.every((result, index) => result.userId === entries[index]?.id && result.place === index + 1);
-  function move(index: number, direction: -1 | 1) { const next = [...entries]; const target = index + direction; if (target < 0 || target >= next.length) return; [next[index], next[target]] = [next[target], next[index]]; setEntries(next); }
+  function setOrderedEntries(next: AdminUser[]) {
+    setEntries(next);
+    setScores(Object.fromEntries(next.map((user, index) => [user.id, String(defaultTournamentScore(index))])));
+  }
+  function move(index: number, direction: -1 | 1) { const next = [...entries]; const target = index + direction; if (target < 0 || target >= next.length) return; [next[index], next[target]] = [next[target], next[index]]; setOrderedEntries(next); }
+  function addArrivals() {
+    if (arrivals.length < 2) { setError('Для результатов нужно отметить минимум двух пришедших'); return; }
+    if (entries.length && !window.confirm('Заменить текущий черновик списком прошедших чек-ин?')) return;
+    setOrderedEntries(arrivals); setEliminatedCount(0); setEliminationMode(true);
+    setError(null);
+  }
+  function eliminate(index: number) {
+    const activeCount = entries.length - eliminatedCount;
+    if (index >= activeCount || activeCount <= 1) return;
+    const next = [...entries];
+    const [player] = next.splice(index, 1);
+    next.splice(activeCount - 1, 0, player);
+    setOrderedEntries(next); setEliminatedCount((count) => count + 1);
+  }
   async function save() {
     setSaving(true); setError(null);
-    try { await post(`/admin/tournaments/${details.id}/results`, { results: entries.map((user, index) => ({ userId: user.id, place: index + 1 })) }, 'PUT'); await onSaved(); }
+    try { await post(`/admin/tournaments/${details.id}/results`, { results: entries.map((user, index) => ({ userId: user.id, place: index + 1 })) }, 'PUT'); await onSaved(); onDone('Места игроков сохранены'); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось сохранить результаты'); }
     finally { setSaving(false); }
   }
@@ -568,11 +770,144 @@ function ResultsEditor({ details, users, onSaved, onDone }: { details: Tournamen
   }
   return <div className="integrated-results">
     <div className="results-note"><CircleAlert size={17} /><span>Сначала сохраните места. Затем проверьте очки и начислите их одной атомарной операцией — либо всем, либо никому.</span></div>
-    <div className="add-player"><select value={playerId} onChange={(event) => setPlayerId(event.target.value)}><option value="">Выберите игрока</option>{available.map((user) => <option value={user.id} key={user.id}>{user.username ? `@${user.username}` : `${user.firstName} ${user.lastName ?? ''}`}</option>)}</select><button className="button secondary" disabled={!playerId} onClick={() => { const user = users.find((item) => item.id === playerId); if (user) setEntries([...entries, user]); setPlayerId(''); }}><Plus size={17} />Добавить</button></div>
-    <div className="result-list">{entries.map((user, index) => <div className="result-row scoring" key={user.id}><span className={`result-place ${index < 3 ? 'podium' : ''}`}>{index + 1}</span><Avatar firstName={user.firstName} lastName={user.lastName} size="sm" /><div><strong>{user.username ? `@${user.username}` : `${user.firstName} ${user.lastName ?? ''}`}</strong><small>Причина: «{details.title}: {index + 1} место»</small></div><label><input aria-label={`Очки, ${user.firstName}`} type="number" min="1" max="100000" value={scores[user.id] ?? ''} onChange={(event) => setScores({ ...scores, [user.id]: event.target.value })} /><span>PTS</span></label><div className="row-actions"><button onClick={() => move(index, -1)} disabled={index === 0}><ArrowUp /></button><button onClick={() => move(index, 1)} disabled={index === entries.length - 1}><ArrowDown /></button><button className="danger" onClick={() => setEntries(entries.filter((entry) => entry.id !== user.id))}><X /></button></div></div>)}{!entries.length && <Empty icon={<Medal />} title="Добавьте участников" text="Первый в списке займёт первое место" />}</div>
+    {!placesSaved && <div className="results-fast-tools"><div><strong>Быстрое заполнение</strong><small>Черновик автоматически сохраняется в этом браузере</small></div><button className="button secondary" disabled={arrivals.length < 2 || saving} onClick={addArrivals}><UserCheck size={16} />Добавить пришедших ({arrivals.length})</button><button className={`button ghost ${eliminationMode ? 'active' : ''}`} disabled={entries.length < 2} onClick={() => setEliminationMode((value) => !value)}><UserMinus size={16} />Режим выбывания</button></div>}
+    <div className="add-player"><select value={playerId} onChange={(event) => setPlayerId(event.target.value)}><option value="">Выберите игрока</option>{available.map((user) => <option value={user.id} key={user.id}>{user.username ? `@${user.username}` : `${user.firstName} ${user.lastName ?? ''}`}</option>)}</select><button className="button secondary" disabled={!playerId} onClick={() => { const user = users.find((item) => item.id === playerId); if (user) setOrderedEntries([...entries, user]); setPlayerId(''); }}><Plus size={17} />Добавить</button></div>
+    {eliminationMode && entries.length > 1 && !placesSaved && <div className="elimination-hint"><UserMinus size={16} /><span>Нажимайте «Выбыл» по ходу игры. Первый выбывший автоматически получит последнее место. Осталось в игре: <strong>{entries.length - eliminatedCount}</strong>.</span></div>}
+    <div className="result-list">{entries.map((user, index) => {
+      const eliminated = index >= entries.length - eliminatedCount;
+      return <div className={`result-row scoring ${eliminated ? 'eliminated' : ''}`} key={user.id}><span className={`result-place ${index < 3 ? 'podium' : ''}`}>{index + 1}</span><Avatar firstName={user.firstName} lastName={user.lastName} size="sm" /><div><strong>{user.username ? `@${user.username}` : `${user.firstName} ${user.lastName ?? ''}`}</strong><small>{eliminated ? 'Место определено выбыванием' : `Причина: «${details.title}: ${index + 1} место»`}</small></div><label><input aria-label={`Очки, ${user.firstName}`} type="number" min="1" max="100000" value={scores[user.id] ?? ''} onChange={(event) => setScores({ ...scores, [user.id]: event.target.value })} /><span>PTS</span></label>{eliminationMode && !placesSaved && !eliminated ? <button className="eliminate-button" disabled={entries.length - eliminatedCount <= 1} onClick={() => eliminate(index)}><UserMinus size={14} />Выбыл</button> : <div className="row-actions"><button onClick={() => move(index, -1)} disabled={index === 0 || placesSaved}><ArrowUp /></button><button onClick={() => move(index, 1)} disabled={index === entries.length - 1 || placesSaved}><ArrowDown /></button><button className="danger" disabled={placesSaved} onClick={() => setOrderedEntries(entries.filter((entry) => entry.id !== user.id))}><X /></button></div>}</div>;
+    })}{!entries.length && <Empty icon={<Medal />} title="Добавьте участников" text="Загрузите прошедших чек-ин одним нажатием" />}</div>
     {error && <div className="form-error">{error}</div>}
     <div className="results-actions"><button className="button secondary" disabled={entries.length < 2 || saving || placesSaved} onClick={() => void save()}><Save size={17} />{placesSaved ? 'Места сохранены' : saving ? 'Сохраняем…' : 'Сохранить места'}</button><button className="button primary" disabled={!placesSaved || details.pointBatches.length > 0 || saving || entries.some((entry) => Number(scores[entry.id]) <= 0)} onClick={() => void awardAll()}><Coins size={17} />{details.pointBatches.length > 0 ? 'Очки уже начислены' : 'Начислить всем'}</button></div>
     {details.pointBatches.length > 0 && <div className="batch-history"><strong>Пакеты начислений</strong>{details.pointBatches.map((batch) => <span key={batch.id}>{tournamentDate(batch.createdAt).full} · {batch._count.transactions} операций</span>)}</div>}
+  </div>;
+}
+
+function SeatingTab({ tournaments, intent, onDone }: { tournaments: Tournament[]; intent: AdminIntent; onDone: (message: string) => void }) {
+  const available = tournaments.filter((item) => item.status === 'UPCOMING' || item.status === 'ACTIVE');
+  const [tournamentId, setTournamentId] = useState(intent?.kind === 'seating' && intent.targetId ? intent.targetId : available[0]?.id ?? tournaments[0]?.id ?? '');
+  const [data, setData] = useState<SeatingData | null>(null);
+  const [capacityPerTable, setCapacityPerTable] = useState('8');
+  const [tableCount, setTableCount] = useState('');
+  const [onlyCheckedIn, setOnlyCheckedIn] = useState(false);
+  const [selectedPlayer, setSelectedPlayer] = useState<{ userId: string; seatId: string | null; label: string } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async (id: string) => {
+    if (!id) { setData(null); return; }
+    setLoading(true); setError(null);
+    try {
+      const next = await api<SeatingData>(`/admin/tournaments/${encodeURIComponent(id)}/seating`);
+      setData(next);
+      if (next.tables[0]) setCapacityPerTable(String(next.tables[0].capacity));
+      setTableCount(next.tables.length ? String(next.tables.length) : '');
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось загрузить рассадку'); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { setSelectedPlayer(null); void load(tournamentId); }, [tournamentId, load]);
+  useEffect(() => {
+    if (intent?.kind === 'seating' && intent.targetId) setTournamentId(intent.targetId);
+  }, [intent?.kind, intent?.nonce, intent?.targetId]);
+
+  async function generate() {
+    if (!tournamentId) return;
+    const replacing = Boolean(data?.tables.length);
+    if (replacing && !window.confirm(`${data?.tournament.seatingPublishedAt ? 'Рассадка опубликована. ' : ''}Пересоздать её случайным образом? Ручные перемещения будут заменены.`)) return;
+    setSaving(true); setError(null); setSelectedPlayer(null);
+    try {
+      const next = await post<SeatingData>(`/admin/tournaments/${tournamentId}/seating/generate`, {
+        capacityPerTable: Number(capacityPerTable),
+        tableCount: tableCount ? Number(tableCount) : undefined,
+        onlyCheckedIn,
+        force: replacing
+      });
+      setData(next); setTableCount(String(next.tables.length));
+      onDone(`Рассажено ${next.seatedCount} игроков за ${next.tables.length} столами`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось сформировать рассадку'); }
+    finally { setSaving(false); }
+  }
+
+  async function chooseSeat(tableId: string, seatNumber: number, occupant?: SeatingData['tables'][number]['seats'][number]) {
+    if (!selectedPlayer) {
+      if (occupant) setSelectedPlayer({ userId: occupant.userId, seatId: occupant.id, label: playerLabel(occupant.user) });
+      return;
+    }
+    if (occupant?.userId === selectedPlayer.userId) { setSelectedPlayer(null); return; }
+    if (!selectedPlayer.seatId && occupant) { setError('Для нового игрока выберите свободное место'); return; }
+    setSaving(true); setError(null);
+    try {
+      const next = await post<SeatingData>(`/admin/tournaments/${tournamentId}/seating/assign`, { userId: selectedPlayer.userId, tableId, seatNumber });
+      setData(next); setSelectedPlayer(null);
+      onDone(occupant ? 'Игроки поменяны местами' : 'Место игрока обновлено');
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось изменить место'); }
+    finally { setSaving(false); }
+  }
+
+  async function unseat(seatId: string) {
+    setSaving(true); setError(null);
+    try {
+      const next = await post<SeatingData>(`/admin/tournaments/${tournamentId}/seating/seats/${seatId}`, undefined, 'DELETE');
+      setData(next); setSelectedPlayer(null); onDone('Игрок возвращён в список без места');
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось освободить место'); }
+    finally { setSaving(false); }
+  }
+
+  async function publish() {
+    if (!data) return;
+    if (data.unseated.length && !window.confirm(`${data.unseated.length} игроков пока без места. Всё равно опубликовать рассадку?`)) return;
+    setSaving(true); setError(null);
+    try {
+      const result = await post<{ seating: SeatingData; sentCount: number; failedCount: number }>(`/admin/tournaments/${tournamentId}/seating/publish`);
+      setData(result.seating); onDone(`Рассадка опубликована · уведомлено ${result.sentCount}, ошибок ${result.failedCount}`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось опубликовать рассадку'); }
+    finally { setSaving(false); }
+  }
+
+  async function unpublish() {
+    setSaving(true); setError(null);
+    try { const next = await post<SeatingData>(`/admin/tournaments/${tournamentId}/seating/unpublish`); setData(next); onDone('Рассадка скрыта от игроков'); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось скрыть рассадку'); }
+    finally { setSaving(false); }
+  }
+
+  return <div className="admin-view seating-view">
+    <AdminHeading eyebrow="ТУРНИРНЫЙ ДИРЕКТОР" title="Рассадка игроков" text="Автоматическое распределение, ручные перестановки и публикация мест в Telegram" />
+    <section className="seating-toolbar">
+      <label className="seating-tournament-select">Турнир<select value={tournamentId} onChange={(event) => setTournamentId(event.target.value)}><option value="">Выберите турнир</option>{(available.length ? available : tournaments).map((item) => <option key={item.id} value={item.id}>{item.title} · {tournamentDate(item.startsAt).full}</option>)}</select></label>
+      <label>Мест за столом<select value={capacityPerTable} onChange={(event) => setCapacityPerTable(event.target.value)}>{Array.from({ length: 9 }, (_, index) => index + 2).map((count) => <option key={count}>{count}</option>)}</select></label>
+      <label>Количество столов<input type="number" min="1" max="100" value={tableCount} onChange={(event) => setTableCount(event.target.value)} placeholder="Авто" /></label>
+      <label className="seating-check"><input type="checkbox" checked={onlyCheckedIn} onChange={(event) => setOnlyCheckedIn(event.target.checked)} />Только прошедшие чек-ин</label>
+      <button className="button primary" disabled={saving || !tournamentId} onClick={() => void generate()}><Shuffle size={17} />{data?.tables.length ? 'Пересобрать' : 'Рассадить'}</button>
+    </section>
+    {error && <div className="form-error seating-error">{error}</div>}
+    {loading && !data ? <Loading label="Открываем зал…" /> : data ? <>
+      <div className="seating-summary">
+        <article><span><Users /></span><div><small>Игроков с местом</small><strong>{data.seatedCount}<em> / {data.eligibleCount}</em></strong></div></article>
+        <article><span><Armchair /></span><div><small>Столов</small><strong>{data.tables.length}</strong></div></article>
+        <article className={data.tournament.seatingPublishedAt ? 'published' : ''}><span>{data.tournament.seatingPublishedAt ? <Eye /> : <EyeOff />}</span><div><small>Статус</small><strong>{data.tournament.seatingPublishedAt ? 'Опубликована' : 'Черновик'}</strong></div></article>
+        <div className="seating-publish-actions">{data.tournament.seatingPublishedAt ? <button className="button secondary" disabled={saving} onClick={() => void unpublish()}><EyeOff size={16} />Скрыть</button> : <button className="button publish-button" disabled={saving || !data.seatedCount} onClick={() => void publish()}><Eye size={16} />Опубликовать</button>}</div>
+      </div>
+      {selectedPlayer && <div className="seating-selection"><Armchair size={16} /><span>Выбран <strong>{selectedPlayer.label}</strong>. Нажмите на {selectedPlayer.seatId ? 'любое другое место для переноса или обмена' : 'свободное место'}.</span><button onClick={() => setSelectedPlayer(null)}><X size={15} /></button></div>}
+      <div className="poker-room">{data.tables.map((table) => {
+        const seats = new Map(table.seats.map((seat) => [seat.seatNumber, seat]));
+        return <article className="poker-table-card" key={table.id}>
+          <header><div><span>СТОЛ</span><strong>№{table.number}</strong></div><p>{table.seats.length}/{table.capacity} мест</p></header>
+          <div className="poker-seat-grid">{Array.from({ length: table.capacity }, (_, index) => index + 1).map((seatNumber) => {
+            const seat = seats.get(seatNumber);
+            const selected = seat?.userId === selectedPlayer?.userId;
+            return <div className={`poker-seat ${seat ? 'occupied' : 'empty'} ${selected ? 'selected' : ''}`} key={seatNumber}>
+              <button disabled={saving} onClick={() => void chooseSeat(table.id, seatNumber, seat)}>
+                <span>{seatNumber}</span>{seat ? <><Avatar firstName={seat.user.firstName} lastName={seat.user.lastName} photoUrl={seat.user.photoUrl} size="sm" /><strong>{playerLabel(seat.user)}</strong></> : <><i>+</i><small>Свободно</small></>}
+              </button>
+              {seat && <button className="unseat-button" disabled={saving} onClick={() => void unseat(seat.id)} title="Освободить место"><UserMinus size={12} /></button>}
+            </div>;
+          })}</div>
+        </article>;
+      })}</div>
+      <section className="unseated-panel"><div className="admin-section-title"><div><h2>Без места</h2><p>Выберите игрока, затем нажмите на свободное место за столом</p></div><span>{data.unseated.length}</span></div><div className="unseated-list">{data.unseated.map((registration) => <button key={registration.id} className={selectedPlayer?.userId === registration.userId ? 'selected' : ''} onClick={() => setSelectedPlayer({ userId: registration.userId, seatId: null, label: playerLabel(registration.user) })}><Avatar firstName={registration.user.firstName} lastName={registration.user.lastName} photoUrl={registration.user.photoUrl} size="sm" /><span><strong>{playerLabel(registration.user)}</strong><small>{registrationStatusLabel(registration.status)}</small></span><Plus size={15} /></button>)}{!data.unseated.length && <p>Все доступные игроки рассажены.</p>}</div></section>
+    </> : <Empty icon={<Armchair />} title="Выберите турнир" text="После выбора здесь появятся столы и список игроков" />}
   </div>;
 }
 
@@ -683,11 +1018,58 @@ function SettingsTab({ seasons, tags, reasonPresets, onDone }: { seasons: Season
       <section className="settings-list-card"><div className="admin-section-title"><div><h2>Шаблоны причин</h2><p>Быстрые кнопки при начислении</p></div><button className="button secondary" onClick={() => { setError(null); setEditingPreset(null); setPresetOpen(true); }}><Plus size={15} />Добавить</button></div><div>{reasonPresets.map((preset) => <article className={!preset.isActive ? 'inactive' : ''} key={preset.id}><span><Coins /></span><div><strong>{preset.label}</strong><small>{preset.reason}{preset.defaultAmount ? ` · ${Math.abs(preset.defaultAmount)} PTS` : ''}</small></div><div className="settings-row-actions"><button title="Изменить" onClick={() => { setError(null); setEditingPreset(preset); setPresetOpen(true); }}><Edit3 /></button><button onClick={() => void togglePreset(preset)}>{preset.isActive ? 'Скрыть' : 'Включить'}</button></div></article>)}</div></section>
       <section className="settings-list-card"><div className="admin-section-title"><div><h2>Теги игроков</h2><p>Приватная сегментация клуба</p></div><button className="button secondary" onClick={() => { setError(null); setEditingTag(null); setTagOpen(true); }}><Plus size={15} />Добавить</button></div><div>{tags.map((tag) => <article key={tag.id}><i style={{ background: tag.color }} /><div><strong>{tag.name}</strong><small>Доступен в карточке и фильтрах</small></div><div className="settings-row-actions"><button title="Изменить" onClick={() => { setError(null); setEditingTag(tag); setTagOpen(true); }}><Edit3 /></button><button className="danger" title="Удалить" onClick={() => void deleteTag(tag)}><Trash2 /></button></div></article>)}</div></section>
     </div>
+    <BrandingEditor onDone={onDone} />
     <section className="owner-security-card"><span><ShieldCheck /></span><div><h3>Администраторы защищены через Render</h3><p>Главные Telegram ID задаются в <code>ADMIN_TELEGRAM_IDS</code>. Сервер проверяет whitelist при каждом запросе к админке и исправляет роль пользователя при входе.</p></div></section>
     {modalOpen && <Modal title={editing ? 'Редактировать сезон' : 'Новый сезон'} onClose={() => setModalOpen(false)}><form className="admin-form" onSubmit={saveSeason}><div className="form-row"><label>Название<input name="name" required minLength={2} defaultValue={editing?.name ?? ''} placeholder="Сезон 05" /></label><label>Номер<input type="number" name="number" required min="1" defaultValue={editing?.number ?? Math.max(0, ...seasons.map((season) => season.number)) + 1} /></label></div><div className="form-row"><label>Начало<input type="date" name="startsAt" required defaultValue={editing ? dateInput(editing.startsAt) : ''} /></label><label>Окончание<input type="date" name="endsAt" required defaultValue={editing ? dateInput(editing.endsAt) : ''} /></label></div><label className="checkbox"><input type="checkbox" name="isActive" defaultChecked={editing?.isActive ?? false} />Активный сезон</label>{!editing?.isActive && <div className="destructive-note"><CircleAlert size={16} /><span>Активация сбросит текущие балансы до 0. Журнал очков и прошлые сезоны сохранятся.</span></div>}{error && <div className="form-error">{error}</div>}<button className="button primary wide" disabled={saving}><Save size={17} />{saving ? 'Сохраняем…' : 'Сохранить сезон'}</button></form></Modal>}
     {tagOpen && <Modal title={editingTag ? 'Редактировать тег' : 'Новый тег'} onClose={() => { setTagOpen(false); setEditingTag(null); }}><form key={editingTag?.id ?? 'new'} className="admin-form" onSubmit={createTag}><label>Название<input name="name" minLength={2} maxLength={30} required defaultValue={editingTag?.name ?? ''} placeholder="VIP" /></label><label>Цвет<input name="color" type="color" defaultValue={editingTag?.color ?? '#3b8cff'} /></label>{error && <div className="form-error">{error}</div>}<button className="button primary wide" disabled={saving}><Tags size={16} />{editingTag ? 'Сохранить тег' : 'Создать тег'}</button></form></Modal>}
     {presetOpen && <Modal title={editingPreset ? 'Редактировать шаблон' : 'Новый шаблон причины'} onClose={() => { setPresetOpen(false); setEditingPreset(null); }}><form key={editingPreset?.id ?? 'new'} className="admin-form" onSubmit={createPreset}><div className="form-row"><label>Короткое название<input name="label" minLength={2} maxLength={30} required defaultValue={editingPreset?.label ?? ''} placeholder="Призовое место" /></label><label>Для операции<select name="kind" defaultValue={editingPreset?.kind ?? 'BOTH'}><option value="BOTH">Любой</option><option value="AWARD">Начисление</option><option value="DEDUCTION">Списание</option></select></label></div><label>Текст причины<input name="reason" minLength={3} maxLength={160} required defaultValue={editingPreset?.reason ?? ''} placeholder="Призовое место в турнире" /></label><label>Сумма по умолчанию (необязательно)<input name="defaultAmount" type="number" min="-100000" max="100000" defaultValue={editingPreset?.defaultAmount ?? ''} placeholder="100" /></label>{error && <div className="form-error">{error}</div>}<button className="button primary wide" disabled={saving}><Save size={16} />{editingPreset ? 'Сохранить шаблон' : 'Создать шаблон'}</button></form></Modal>}
   </div>;
+}
+
+function BrandingEditor({ onDone }: { onDone: (message: string) => void }) {
+  const [settings, setSettings] = useState<BrandingSettings | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api<BrandingSettings>('/admin/branding').then((value) => { setSettings(value); setPreview(value.ratingBannerImageData); }).catch((cause: Error) => setError(cause.message));
+  }, []);
+
+  async function chooseImage(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setError(null);
+    try { setPreview(await prepareRatingBanner(file)); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось обработать изображение'); }
+  }
+  async function save() {
+    if (!preview) return;
+    setSaving(true); setError(null);
+    try {
+      const result = await post<BrandingSettings>('/admin/branding/rating-banner', { imageData: preview }, 'PUT');
+      setSettings(result); setPreview(result.ratingBannerImageData); onDone('Изображение рейтинговой карточки обновлено');
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось сохранить изображение'); }
+    finally { setSaving(false); }
+  }
+  async function remove() {
+    if (!window.confirm('Вернуть стандартный синий фон рейтинговой карточки?')) return;
+    setSaving(true); setError(null);
+    try {
+      const result = await post<BrandingSettings>('/admin/branding/rating-banner', undefined, 'DELETE');
+      setSettings(result); setPreview(null); onDone('Стандартный фон восстановлен');
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось удалить изображение'); }
+    finally { setSaving(false); }
+  }
+  const changed = preview !== settings?.ratingBannerImageData;
+  return <section className="branding-editor">
+    <div className="admin-section-title"><div><h2>Оформление рейтинга</h2><p>Фоновое изображение синей карточки на главной странице</p></div></div>
+    <div className="branding-editor-grid">
+      <div className={`branding-preview ${preview ? 'custom' : ''}`} style={preview ? { backgroundImage: `linear-gradient(90deg, rgba(5, 38, 91, .88), rgba(5, 48, 119, .52)), url(${preview})` } : undefined}><span>Ваш рейтинг</span><strong>#2</strong><small>100 PTS</small></div>
+      <div className="branding-controls"><span><ImagePlus /></span><div><h3>{preview ? 'Изображение выбрано' : 'Стандартный фон'}</h3><p>PNG, JPEG или WebP. Файл автоматически уменьшается и переводится в WebP.</p></div><div><label className="button secondary">Выбрать файл<input type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void chooseImage(event)} /></label><button className="button primary" disabled={!preview || !changed || saving} onClick={() => void save()}><Save size={15} />Сохранить</button>{settings?.ratingBannerImageData && <button className="icon-button delete-tournament" disabled={saving} onClick={() => void remove()} title="Вернуть стандартный фон"><Trash2 size={15} /></button>}</div></div>
+    </div>
+    {error && <div className="form-error">{error}</div>}
+  </section>;
 }
 
 function AuditTab() {
@@ -718,7 +1100,7 @@ function AuditJson({ title, value }: { title: string; value: unknown }) {
 }
 
 function MoreTab({ onNavigate }: { onNavigate: (section: AdminSection) => void }) {
-  return <div className="admin-view more-view"><AdminHeading eyebrow="УПРАВЛЕНИЕ" title="Ещё" text="Аудит, безопасность и параметры клуба" /><div className="more-menu-grid"><button onClick={() => onNavigate('audit')}><span><History /></span><div><strong>Аудит действий</strong><small>Полная история изменений</small></div><ChevronRight /></button><button onClick={() => onNavigate('access')}><span><KeyRound /></span><div><strong>Доступ из браузера</strong><small>Приглашения и активные сессии</small></div><ChevronRight /></button><button onClick={() => onNavigate('settings')}><span><Settings /></span><div><strong>Настройки</strong><small>Сезоны, причины и теги</small></div><ChevronRight /></button><Link to="/"><span><LogOut /></span><div><strong>Вернуться в приложение</strong><small>Закрыть панель управления</small></div><ChevronRight /></Link></div></div>;
+  return <div className="admin-view more-view"><AdminHeading eyebrow="УПРАВЛЕНИЕ" title="Ещё" text="Рассадка, аудит, безопасность и параметры клуба" /><div className="more-menu-grid"><button onClick={() => onNavigate('seating')}><span><Armchair /></span><div><strong>Рассадка игроков</strong><small>Столы, места и публикация</small></div><ChevronRight /></button><button onClick={() => onNavigate('audit')}><span><History /></span><div><strong>Аудит действий</strong><small>Полная история изменений</small></div><ChevronRight /></button><button onClick={() => onNavigate('access')}><span><KeyRound /></span><div><strong>Доступ из браузера</strong><small>Приглашения и активные сессии</small></div><ChevronRight /></button><button onClick={() => onNavigate('settings')}><span><Settings /></span><div><strong>Настройки</strong><small>Сезоны, оформление, причины и теги</small></div><ChevronRight /></button><Link to="/"><span><LogOut /></span><div><strong>Вернуться в приложение</strong><small>Закрыть панель управления</small></div><ChevronRight /></Link></div></div>;
 }
 
 function InviteResult({ invite, onCopied }: { invite: BrowserInviteResult; onCopied: (message: string) => void }) {
@@ -761,10 +1143,41 @@ function tournamentPayload(form: FormData) {
 function dateTimeInput(value: string) { const date = new Date(value); return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16); }
 function dateInput(value: string) { return new Date(value).toISOString().slice(0, 10); }
 function dateOnlyLabel(value: string) { return new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(value)); }
+function playerLabel(user: Pick<User, 'firstName' | 'lastName' | 'username'>) { return user.username ? `@${user.username}` : `${user.firstName} ${user.lastName ?? ''}`.trim(); }
+function defaultTournamentScore(index: number) { return [500, 350, 250, 150, 100][index] ?? 50; }
+async function prepareRatingBanner(file: File) {
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('Выберите PNG, JPEG или WebP');
+  if (file.size > 8 * 1024 * 1024) throw new Error('Исходный файл должен быть меньше 8 МБ');
+  const url = URL.createObjectURL(file);
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error('Изображение повреждено или не поддерживается'));
+      element.src = url;
+    });
+    const width = 1400;
+    const height = 560;
+    const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight);
+    const sourceWidth = width / scale;
+    const sourceHeight = height / scale;
+    const sourceX = Math.max(0, (image.naturalWidth - sourceWidth) / 2);
+    const sourceY = Math.max(0, (image.naturalHeight - sourceHeight) / 2);
+    const canvas = document.createElement('canvas');
+    canvas.width = width; canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Браузер не поддерживает обработку изображений');
+    context.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, width, height);
+    let data = canvas.toDataURL('image/webp', .8);
+    if (!data.startsWith('data:image/webp')) data = canvas.toDataURL('image/jpeg', .82);
+    if (data.length > 850_000) throw new Error('После обработки изображение всё ещё слишком большое. Выберите более простой файл.');
+    return data;
+  } finally { URL.revokeObjectURL(url); }
+}
 function isSessionActive(session: BrowserSession) { return !session.revokedAt && new Date(session.expiresAt) > new Date(); }
 function registrationStatusLabel(value: TournamentRegistrationStatus) { return { REGISTERED: 'В основном списке', WAITLISTED: 'Лист ожидания', CHECKED_IN: 'Присутствие подтверждено', PLAYED: 'Сыграл', CANCELLED: 'Отменено' }[value]; }
 function auditActionLabel(value: string) {
-  const labels: Record<string, string> = { POINTS_AWARDED: 'Начисление очков', POINTS_DEDUCTED: 'Списание очков', POINTS_BATCH_CREATED: 'Пакет очков', POINTS_REVERSED: 'Отмена операции', TOURNAMENT_CREATED: 'Создание турнира', TOURNAMENT_UPDATED: 'Изменение турнира', TOURNAMENT_DELETED: 'Удаление турнира', TOURNAMENT_RESULTS_UPDATED: 'Результаты', REGISTRATION_CREATED: 'Регистрация', WAITLIST_JOINED: 'Лист ожидания', REGISTRATION_STATUS_CHANGED: 'Статус заявки', REGISTRATION_CANCELLED: 'Отмена заявки', WAITLIST_PROMOTED: 'Перевод из очереди', SEASON_CREATED: 'Создание сезона', SEASON_UPDATED: 'Изменение сезона', SEASON_FINALIZED: 'Финализация сезона', USER_NOTE_UPDATED: 'Заметка', USER_TAG_ADDED: 'Добавление тега', USER_TAG_REMOVED: 'Удаление тега', TAG_CREATED: 'Создание тега', TAG_UPDATED: 'Изменение тега', TAG_DELETED: 'Удаление тега', BROWSER_INVITE_CREATED: 'Браузерное приглашение', BROWSER_SESSION_REVOKED: 'Отзыв доступа', TOURNAMENT_NOTIFICATION_SENT: 'Уведомление', TOURNAMENT_TEMPLATE_CREATED: 'Создание шаблона', TOURNAMENT_TEMPLATE_UPDATED: 'Изменение шаблона', TOURNAMENT_TEMPLATE_DELETED: 'Удаление шаблона', RECURRING_TOURNAMENT_CREATED: 'Турнир по расписанию', REASON_PRESET_CREATED: 'Создание причины', REASON_PRESET_UPDATED: 'Изменение причины' };
+  const labels: Record<string, string> = { POINTS_AWARDED: 'Начисление очков', POINTS_DEDUCTED: 'Списание очков', POINTS_BATCH_CREATED: 'Пакет очков', POINTS_REVERSED: 'Отмена операции', TOURNAMENT_CREATED: 'Создание турнира', TOURNAMENT_UPDATED: 'Изменение турнира', TOURNAMENT_DELETED: 'Удаление турнира', TOURNAMENT_RESULTS_UPDATED: 'Результаты', REGISTRATION_CREATED: 'Регистрация', WAITLIST_JOINED: 'Лист ожидания', REGISTRATION_STATUS_CHANGED: 'Статус заявки', REGISTRATION_CANCELLED: 'Отмена заявки', WAITLIST_PROMOTED: 'Перевод из очереди', SEASON_CREATED: 'Создание сезона', SEASON_UPDATED: 'Изменение сезона', SEASON_FINALIZED: 'Финализация сезона', USER_NOTE_UPDATED: 'Заметка', USER_TAG_ADDED: 'Добавление тега', USER_TAG_REMOVED: 'Удаление тега', PHONE_SHARED: 'Передача телефона', TAG_CREATED: 'Создание тега', TAG_UPDATED: 'Изменение тега', TAG_DELETED: 'Удаление тега', BROWSER_INVITE_CREATED: 'Браузерное приглашение', BROWSER_SESSION_REVOKED: 'Отзыв доступа', TOURNAMENT_NOTIFICATION_SENT: 'Уведомление', TOURNAMENT_TEMPLATE_CREATED: 'Создание шаблона', TOURNAMENT_TEMPLATE_UPDATED: 'Изменение шаблона', TOURNAMENT_TEMPLATE_DELETED: 'Удаление шаблона', RECURRING_TOURNAMENT_CREATED: 'Турнир по расписанию', REASON_PRESET_CREATED: 'Создание причины', REASON_PRESET_UPDATED: 'Изменение причины', SEATING_GENERATED: 'Создание рассадки', SEATING_REGENERATED: 'Пересоздание рассадки', PLAYER_SEATED: 'Посадка игрока', PLAYER_MOVED: 'Пересадка игрока', SEATS_SWAPPED: 'Обмен местами', PLAYER_UNSEATED: 'Снятие с места', SEATING_PUBLISHED: 'Публикация рассадки', SEATING_UNPUBLISHED: 'Скрытие рассадки', RATING_BANNER_UPDATED: 'Фон рейтинга', RATING_BANNER_REMOVED: 'Удаление фона рейтинга' };
   return labels[value] ?? value.split('_').join(' ').toLowerCase();
 }
-function auditEntityLabel(value: string) { return ({ User: 'Игроки', Tournament: 'Турниры', Season: 'Сезоны', PointTransaction: 'Очки', PointBatch: 'Пакеты очков', TournamentRegistration: 'Регистрации', TournamentTemplate: 'Шаблоны турниров', PlayerTag: 'Теги', BrowserSession: 'Доступ', BrowserInvite: 'Приглашения' } as Record<string, string>)[value] ?? value; }
+function auditEntityLabel(value: string) { return ({ User: 'Игроки', Tournament: 'Турниры', TournamentSeating: 'Рассадка', ClubSettings: 'Оформление', Season: 'Сезоны', PointTransaction: 'Очки', PointBatch: 'Пакеты очков', TournamentRegistration: 'Регистрации', TournamentTemplate: 'Шаблоны турниров', PlayerTag: 'Теги', BrowserSession: 'Доступ', BrowserInvite: 'Приглашения' } as Record<string, string>)[value] ?? value; }

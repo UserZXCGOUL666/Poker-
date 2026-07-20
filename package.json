@@ -1,8 +1,10 @@
 {
   "name": "poker-club-mini-app",
-  "version": "1.4.0",
+  "version": "1.6.0",
   "private": true,
-  "workspaces": ["apps/*"],
+  "workspaces": [
+    "apps/*"
+  ],
   "scripts": {
     "dev": "concurrently -n api,web -c blue,cyan \"npm run dev -w @poker-club/api\" \"npm run dev -w @poker-club/web\"",
     "build": "npm run build -w @poker-club/api && npm run build -w @poker-club/web",

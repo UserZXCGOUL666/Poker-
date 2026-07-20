@@ -1,6 +1,6 @@
 import { TournamentRegistrationStatus } from '@prisma/client';
 import { describe, expect, it } from 'vitest';
-import { canPlayerCancelRegistration, isOccupiedRegistration, nextRegistrationStatus } from './registrations.js';
+import { canPlayerCancelRegistration, isOccupiedRegistration, nextRegistrationStatus, shouldNotifyRegistrationStatusChange } from './registrations.js';
 
 describe('tournament registration rules', () => {
   it('uses the main list until capacity is reached', () => {
@@ -22,5 +22,12 @@ describe('tournament registration rules', () => {
     expect(canPlayerCancelRegistration('ACTIVE', TournamentRegistrationStatus.REGISTERED)).toBe(false);
     expect(canPlayerCancelRegistration('UPCOMING', TournamentRegistrationStatus.CHECKED_IN)).toBe(false);
     expect(canPlayerCancelRegistration('FINISHED', TournamentRegistrationStatus.PLAYED)).toBe(false);
+  });
+
+  it('does not spam players with internal check-in status changes', () => {
+    expect(shouldNotifyRegistrationStatusChange(TournamentRegistrationStatus.REGISTERED, TournamentRegistrationStatus.CHECKED_IN)).toBe(false);
+    expect(shouldNotifyRegistrationStatusChange(TournamentRegistrationStatus.CHECKED_IN, TournamentRegistrationStatus.REGISTERED)).toBe(false);
+    expect(shouldNotifyRegistrationStatusChange(TournamentRegistrationStatus.WAITLISTED, TournamentRegistrationStatus.REGISTERED)).toBe(true);
+    expect(shouldNotifyRegistrationStatusChange(TournamentRegistrationStatus.REGISTERED, TournamentRegistrationStatus.CANCELLED)).toBe(true);
   });
 });

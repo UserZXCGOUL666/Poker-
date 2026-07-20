@@ -49,6 +49,8 @@ model User {
   role                  UserRole                 @default(PLAYER)
   points                Int                      @default(0)
   adminNote             String?
+  phoneNumber           String?                  @unique
+  phoneSharedAt         DateTime?
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @updatedAt
   results               TournamentResult[]
@@ -63,6 +65,7 @@ model User {
   pointBatchesCreated   PointBatch[]             @relation("PointBatchAdmin")
   finalizedSeasons      Season[]                 @relation("SeasonFinalizedBy")
   seasonStandings       SeasonStanding[]
+  seatAssignments       TournamentSeat[]
 
   @@index([points, createdAt])
 }
@@ -124,6 +127,8 @@ model Tournament {
   status               TournamentStatus         @default(UPCOMING)
   registrationClosed   Boolean                  @default(false)
   registrationDeadline DateTime?
+  seatingPublishedAt   DateTime?
+  seatingVersion       Int                      @default(0)
   templateId           String?
   createdAt            DateTime                 @default(now())
   updatedAt            DateTime                 @updatedAt
@@ -133,6 +138,8 @@ model Tournament {
   registrations        TournamentRegistration[]
   pointBatches         PointBatch[]
   template             TournamentTemplate?      @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  tables               TournamentTable[]
+  seats                TournamentSeat[]
 
   @@unique([templateId, startsAt])
   @@index([seasonId, startsAt])
@@ -271,6 +278,43 @@ model UserTag {
 
   @@id([userId, tagId])
   @@index([tagId, userId])
+}
+
+model TournamentTable {
+  id           String           @id @default(cuid())
+  tournamentId String
+  number       Int
+  capacity     Int
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  tournament   Tournament       @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  seats        TournamentSeat[]
+
+  @@unique([tournamentId, number])
+  @@index([tournamentId, number])
+}
+
+model TournamentSeat {
+  id           String          @id @default(cuid())
+  tournamentId String
+  tableId      String
+  userId       String
+  seatNumber   Int
+  assignedAt   DateTime        @default(now())
+  tournament   Tournament      @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  table        TournamentTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tournamentId, userId])
+  @@unique([tableId, seatNumber])
+  @@index([tournamentId, tableId])
+  @@index([userId, assignedAt])
+}
+
+model ClubSettings {
+  id                    String   @id @default("main")
+  ratingBannerImageData String?  @db.Text
+  updatedAt             DateTime @updatedAt
 }
 
 model AuditLog {

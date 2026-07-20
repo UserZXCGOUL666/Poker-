@@ -11,9 +11,10 @@ import { shouldResetSeasonBalances } from '../services/seasons.js';
 import { participantsFitCapacity } from '../services/tournaments.js';
 import { writeAudit } from '../services/audit.js';
 import { applyBulkPointChanges, reversePointTransaction } from '../services/pointOperations.js';
-import { registerForTournament, updateRegistrationStatus } from '../services/registrations.js';
+import { registerForTournament, shouldNotifyRegistrationStatusChange, updateRegistrationStatus } from '../services/registrations.js';
 import { generateRecurringTournaments } from '../services/recurringTournaments.js';
 import { finalizeSeason } from '../services/seasonsFinalization.js';
+import { assignPlayerSeat, autoSeatTournament, getTournamentSeating, unseatPlayer } from '../services/seating.js';
 
 export const adminRouter = Router();
 adminRouter.use(requireAuth, requireAdmin);
@@ -22,7 +23,8 @@ adminRouter.get('/overview', async (_req, res) => {
   const now = new Date();
   const reminderHorizon = new Date(now.getTime() + 24 * 60 * 60 * 1000);
   const sessionHorizon = new Date(now.getTime() + 3 * 24 * 60 * 60 * 1000);
-  const [players, tournaments, activeSeason, activeBrowserSessions, nextTournament, recentTournaments, recentPointTransactions, unnotifiedTournament, unfinishedTournament, expiringSessions, waitlistedPlayers, capacityCandidates] = await Promise.all([
+  const operationsLookback = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+  const [players, tournaments, activeSeason, activeBrowserSessions, nextTournament, recentTournaments, recentPointTransactions, unnotifiedTournament, unfinishedTournament, expiringSessions, waitlistedPlayers, capacityCandidates, operationsCandidates] = await Promise.all([
     prisma.user.count(),
     prisma.tournament.count(),
     prisma.season.findFirst({ where: { isActive: true } }),
@@ -45,13 +47,48 @@ adminRouter.get('/overview', async (_req, res) => {
       orderBy: { startsAt: 'asc' }
     }),
     prisma.tournament.findFirst({
-      where: { status: 'FINISHED', results: { none: {} } },
+      where: { status: 'FINISHED', startsAt: { gte: operationsLookback }, results: { none: {} } },
       orderBy: { startsAt: 'desc' }
     }),
     prisma.browserSession.count({ where: { revokedAt: null, expiresAt: { gt: now, lte: sessionHorizon } } }),
     prisma.tournamentRegistration.count({ where: { status: TournamentRegistrationStatus.WAITLISTED, tournament: { status: 'UPCOMING' } } }),
-    prisma.tournament.findMany({ where: { status: { in: ['UPCOMING', 'ACTIVE'] }, participantCount: { gt: 0 } }, take: 100 })
+    prisma.tournament.findMany({ where: { status: { in: ['UPCOMING', 'ACTIVE'] }, participantCount: { gt: 0 } }, take: 100 }),
+    prisma.tournament.findMany({
+      where: {
+        OR: [
+          { status: 'ACTIVE' },
+          { status: 'UPCOMING' },
+          { status: 'FINISHED', startsAt: { gte: operationsLookback }, OR: [{ results: { none: {} } }, { pointBatches: { none: {} } }] }
+        ]
+      },
+      orderBy: { startsAt: 'desc' }, take: 50,
+      select: { id: true, status: true, startsAt: true }
+    })
   ]);
+  const focusCandidate = operationsCandidates.find((item) => item.status === 'ACTIVE')
+    ?? operationsCandidates.find((item) => item.status === 'UPCOMING' && item.startsAt < now)
+    ?? operationsCandidates.find((item) => item.status === 'FINISHED')
+    ?? [...operationsCandidates].reverse().find((item) => item.status === 'UPCOMING')
+    ?? null;
+  const focus = focusCandidate ? await prisma.tournament.findUnique({
+    where: { id: focusCandidate.id },
+    select: {
+      id: true, title: true, startsAt: true, location: true, capacity: true, participantCount: true, status: true,
+      registrationClosed: true, seatingPublishedAt: true, seatingVersion: true,
+      season: { select: { name: true } },
+      _count: { select: { results: true, notifications: true, tables: true, seats: true, pointBatches: true } },
+      registrations: { select: { status: true } }
+    }
+  }) : null;
+  const focusTournament = focus ? {
+    ...focus,
+    registrationCounts: focus.registrations.reduce((counts, registration) => {
+      const key = registration.status.toLowerCase() as keyof typeof counts;
+      counts[key] += 1;
+      return counts;
+    }, { registered: 0, waitlisted: 0, checked_in: 0, played: 0, cancelled: 0 }),
+    registrations: undefined
+  } : null;
   const overCapacity = capacityCandidates.find((item) => item.participantCount > item.capacity);
   const alerts = [
     !activeSeason ? { id: 'no-active-season', severity: 'critical', title: 'Нет активного сезона', text: 'Начисление очков заблокировано до активации сезона.', section: 'settings' } : null,
@@ -61,7 +98,57 @@ adminRouter.get('/overview', async (_req, res) => {
     expiringSessions ? { id: 'expiring-sessions', severity: 'info', title: 'Истекают браузерные сессии', text: `${expiringSessions} сессий завершатся в течение трёх дней.`, section: 'access' } : null,
     waitlistedPlayers ? { id: 'waitlisted-players', severity: 'info', title: 'Есть лист ожидания', text: `${waitlistedPlayers} игроков ожидают место в предстоящих турнирах.`, section: 'tournaments' } : null
   ].filter(Boolean);
-  return res.json({ players, tournaments, activeSeason, activeBrowserSessions, nextTournament, recentTournaments, recentPointTransactions, alerts });
+  return res.json({ players, tournaments, activeSeason, activeBrowserSessions, nextTournament, focusTournament, recentTournaments, recentPointTransactions, alerts });
+});
+
+adminRouter.get('/branding', async (_req, res) => {
+  const settings = await prisma.clubSettings.findUnique({ where: { id: 'main' } });
+  return res.json({ ratingBannerImageData: settings?.ratingBannerImageData ?? null, updatedAt: settings?.updatedAt ?? null });
+});
+
+const ratingBannerSchema = z.object({
+  imageData: z.string().max(900_000).refine(
+    (value) => /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(value),
+    'Разрешены только JPEG, PNG или WebP'
+  )
+});
+
+adminRouter.put('/branding/rating-banner', async (req, res, next) => {
+  try {
+    const { imageData } = ratingBannerSchema.parse(req.body);
+    const settings = await prisma.$transaction(async (tx) => {
+      const existing = await tx.clubSettings.findUnique({ where: { id: 'main' } });
+      const updated = await tx.clubSettings.upsert({
+        where: { id: 'main' },
+        update: { ratingBannerImageData: imageData },
+        create: { id: 'main', ratingBannerImageData: imageData }
+      });
+      await writeAudit(tx, {
+        actorId: req.auth!.userId, action: 'RATING_BANNER_UPDATED', entityType: 'ClubSettings', entityId: updated.id,
+        summary: 'Обновлено изображение рейтинговой карточки',
+        before: { hadImage: Boolean(existing?.ratingBannerImageData) }, after: { hadImage: true, bytes: imageData.length }
+      });
+      return updated;
+    });
+    return res.json({ ratingBannerImageData: settings.ratingBannerImageData, updatedAt: settings.updatedAt });
+  } catch (error) { return next(error); }
+});
+
+adminRouter.delete('/branding/rating-banner', async (req, res, next) => {
+  try {
+    const settings = await prisma.$transaction(async (tx) => {
+      const existing = await tx.clubSettings.findUnique({ where: { id: 'main' } });
+      const updated = await tx.clubSettings.upsert({
+        where: { id: 'main' }, update: { ratingBannerImageData: null }, create: { id: 'main' }
+      });
+      await writeAudit(tx, {
+        actorId: req.auth!.userId, action: 'RATING_BANNER_REMOVED', entityType: 'ClubSettings', entityId: updated.id,
+        summary: 'Удалено изображение рейтинговой карточки', before: { hadImage: Boolean(existing?.ratingBannerImageData) }, after: { hadImage: false }
+      });
+      return updated;
+    });
+    return res.json({ ratingBannerImageData: null, updatedAt: settings.updatedAt });
+  } catch (error) { return next(error); }
 });
 
 adminRouter.get('/users', async (req, res) => {
@@ -71,13 +158,14 @@ adminRouter.get('/users', async (req, res) => {
       OR: [
         { firstName: { contains: search, mode: 'insensitive' } },
         { lastName: { contains: search, mode: 'insensitive' } },
-        { username: { contains: search, mode: 'insensitive' } }
+        { username: { contains: search, mode: 'insensitive' } },
+        { phoneNumber: { contains: search } }
       ]
     } : undefined,
     orderBy: [{ points: 'desc' }, { firstName: 'asc' }],
     take: 1000,
     select: {
-      id: true, telegramId: true, firstName: true, lastName: true, username: true, role: true, points: true,
+      id: true, telegramId: true, firstName: true, lastName: true, username: true, role: true, points: true, phoneNumber: true, phoneSharedAt: true,
       tags: { include: { tag: true } },
       results: { orderBy: { createdAt: 'desc' }, take: 1, select: { createdAt: true, tournament: { select: { startsAt: true } } } },
       _count: { select: { results: true, browserSessions: { where: { revokedAt: null, expiresAt: { gt: new Date() } } }, registrations: true } }
@@ -571,7 +659,9 @@ adminRouter.patch('/registrations/:id', async (req, res, next) => {
   try {
     const { status } = z.object({ status: z.nativeEnum(TournamentRegistrationStatus) }).parse(req.body);
     const result = await updateRegistrationStatus(req.params.id, status, req.auth!.userId);
-    const notification = result.duplicate ? null : await notifyUser(
+    const previousStatus = 'previousStatus' in result ? result.previousStatus as TournamentRegistrationStatus : undefined;
+    const playerFacingStatus = shouldNotifyRegistrationStatusChange(previousStatus, status);
+    const notification = result.duplicate || !playerFacingStatus ? null : await notifyUser(
       result.user.telegramId,
       registrationNotification(result.tournament.title, result.tournament.startsAt, status === TournamentRegistrationStatus.CANCELLED ? 'CANCELLED' : status === TournamentRegistrationStatus.WAITLISTED ? 'WAITLISTED' : 'REGISTERED')
     );
@@ -579,6 +669,86 @@ adminRouter.patch('/registrations/:id', async (req, res, next) => {
       ? await notifyUser(result.promoted.user.telegramId, registrationNotification(result.tournament.title, result.tournament.startsAt, 'PROMOTED'))
       : null;
     return res.json({ ...result, user: { ...result.user, telegramId: result.user.telegramId.toString() }, promoted: result.promoted ? { ...result.promoted, user: { ...result.promoted.user, telegramId: result.promoted.user.telegramId.toString() } } : null, notification, promotionNotification });
+  } catch (error) { return next(error); }
+});
+
+const autoSeatingSchema = z.object({
+  capacityPerTable: z.coerce.number().int().min(2).max(10),
+  tableCount: z.coerce.number().int().positive().optional(),
+  onlyCheckedIn: z.boolean().default(false),
+  force: z.boolean().default(false)
+});
+const seatAssignmentSchema = z.object({
+  userId: z.string().min(1),
+  tableId: z.string().min(1),
+  seatNumber: z.coerce.number().int().positive()
+});
+
+adminRouter.get('/tournaments/:id/seating', async (req, res, next) => {
+  try { return res.json(await getTournamentSeating(req.params.id)); }
+  catch (error) { return next(error); }
+});
+
+adminRouter.post('/tournaments/:id/seating/generate', async (req, res, next) => {
+  try {
+    const data = autoSeatingSchema.parse(req.body);
+    return res.json(await autoSeatTournament({ tournamentId: req.params.id, actorId: req.auth!.userId, ...data }));
+  } catch (error) { return next(error); }
+});
+
+adminRouter.post('/tournaments/:id/seating/assign', async (req, res, next) => {
+  try {
+    const data = seatAssignmentSchema.parse(req.body);
+    return res.json(await assignPlayerSeat({ tournamentId: req.params.id, actorId: req.auth!.userId, ...data }));
+  } catch (error) { return next(error); }
+});
+
+adminRouter.delete('/tournaments/:id/seating/seats/:seatId', async (req, res, next) => {
+  try { return res.json(await unseatPlayer({ tournamentId: req.params.id, actorId: req.auth!.userId, seatId: req.params.seatId })); }
+  catch (error) { return next(error); }
+});
+
+adminRouter.post('/tournaments/:id/seating/publish', async (req, res, next) => {
+  try {
+    const seats = await prisma.tournamentSeat.findMany({
+      where: { tournamentId: req.params.id },
+      orderBy: [{ table: { number: 'asc' } }, { seatNumber: 'asc' }],
+      include: { table: true, user: { select: { id: true, telegramId: true, firstName: true } }, tournament: true }
+    });
+    if (!seats.length) return res.status(409).json({ message: 'Сначала сформируйте рассадку' });
+    const tournament = seats[0].tournament;
+    if (tournament.status === TournamentStatus.FINISHED || tournament.status === TournamentStatus.CANCELLED) {
+      return res.status(409).json({ message: 'Нельзя публиковать рассадку завершённого или отменённого турнира' });
+    }
+    const publishedAt = new Date();
+    await prisma.$transaction(async (tx) => {
+      await tx.tournament.update({ where: { id: tournament.id }, data: { seatingPublishedAt: publishedAt } });
+      await writeAudit(tx, {
+        actorId: req.auth!.userId, action: 'SEATING_PUBLISHED', entityType: 'TournamentSeating', entityId: tournament.id,
+        summary: `Опубликована рассадка «${tournament.title}»: ${seats.length} игроков`, after: { publishedAt: publishedAt.toISOString(), seats: seats.length }
+      });
+    });
+    const deliveries = await mapWithConcurrency(seats, 8, (seat) => notifyUser(
+      seat.user.telegramId,
+      `🎲 Рассадка турнира «${tournament.title}» опубликована.\nВаш стол: №${seat.table.number}. Место: №${seat.seatNumber}.`
+    ));
+    const sentCount = deliveries.filter((item) => item.sent).length;
+    return res.json({ seating: await getTournamentSeating(tournament.id), sentCount, failedCount: deliveries.length - sentCount });
+  } catch (error) { return next(error); }
+});
+
+adminRouter.post('/tournaments/:id/seating/unpublish', async (req, res, next) => {
+  try {
+    const tournament = await prisma.tournament.findUnique({ where: { id: req.params.id } });
+    if (!tournament) return res.status(404).json({ message: 'Турнир не найден' });
+    await prisma.$transaction(async (tx) => {
+      await tx.tournament.update({ where: { id: tournament.id }, data: { seatingPublishedAt: null } });
+      await writeAudit(tx, {
+        actorId: req.auth!.userId, action: 'SEATING_UNPUBLISHED', entityType: 'TournamentSeating', entityId: tournament.id,
+        summary: `Рассадка «${tournament.title}» скрыта от игроков`, before: { published: Boolean(tournament.seatingPublishedAt) }, after: { published: false }
+      });
+    });
+    return res.json(await getTournamentSeating(tournament.id));
   } catch (error) { return next(error); }
 });
 

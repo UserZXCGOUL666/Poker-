@@ -6,6 +6,7 @@ interface TelegramWebApp {
   ready(): void;
   expand(): void;
   close(): void;
+  requestContact?(callback?: (shared: boolean) => void): void;
   HapticFeedback?: { impactOccurred(style: 'light' | 'medium' | 'heavy'): void };
 }
 
