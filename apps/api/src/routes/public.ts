@@ -23,6 +23,11 @@ publicRouter.get('/branding/rating-banner', async (_req, res) => {
   return res.send(image);
 });
 
+publicRouter.get('/branding/theme', async (_req, res) => {
+  const settings = await prisma.clubSettings.findUnique({ where: { id: 'main' }, select: { accentColor: true, updatedAt: true } });
+  return res.json({ accentColor: settings?.accentColor ?? '#3B8CFF', updatedAt: settings?.updatedAt ?? null });
+});
+
 publicRouter.use(requireAuth);
 
 const userSelect = { id: true, firstName: true, lastName: true, username: true, photoUrl: true, points: true } as const;
@@ -40,7 +45,7 @@ publicRouter.get('/home', async (req, res) => {
     prisma.pointTransaction.aggregate({ where: { userId: user.id, season: { isActive: true }, createdAt: { gte: weekAgo } }, _sum: { amount: true } }),
     prisma.tournamentResult.count({ where: { userId: user.id, isFinalTable: true, tournament: { season: { isActive: true } } } }),
     prisma.tournamentResult.count({ where: { userId: user.id, tournament: { season: { isActive: true } } } }),
-    prisma.clubSettings.findUnique({ where: { id: 'main' }, select: { ratingBannerImageData: true, updatedAt: true } }),
+    prisma.clubSettings.findUnique({ where: { id: 'main' }, select: { ratingBannerImageData: true, accentColor: true, updatedAt: true } }),
     prisma.tournamentSeat.findFirst({
       where: { userId: user.id, tournament: { seatingPublishedAt: { not: null }, status: { in: ['UPCOMING', 'ACTIVE'] }, startsAt: { gte: new Date(Date.now() - 12 * 60 * 60 * 1000) } } },
       orderBy: { tournament: { startsAt: 'asc' } },
@@ -56,7 +61,7 @@ publicRouter.get('/home', async (req, res) => {
     finalTables,
     gamesPlayed,
     leaders,
-    branding: { hasRatingBanner: Boolean(branding?.ratingBannerImageData), updatedAt: branding?.updatedAt ?? null },
+    branding: { hasRatingBanner: Boolean(branding?.ratingBannerImageData), accentColor: branding?.accentColor ?? '#3B8CFF', updatedAt: branding?.updatedAt ?? null },
     nextSeating
   });
 });

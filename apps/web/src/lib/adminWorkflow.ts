@@ -49,7 +49,7 @@ export function deriveAdminWorkflow(tournament: AdminFocusTournament, now = new 
   } else if (tournament.status === 'ACTIVE' || tournament.status === 'FINISHED') {
     stage = 'RESULTS'; title = tournament.status === 'ACTIVE' ? 'Игра идёт' : 'Нужны результаты'; hint = 'Внесите порядок мест — сохранение автоматически завершит турнир.'; action = 'Внести результаты';
   } else if (tournament.seatingPublishedAt) {
-    stage = 'START'; title = 'Всё готово к старту'; hint = 'Рассадка опубликована. Закройте регистрацию и запустите турнир.'; action = 'Начать турнир';
+    stage = 'START'; title = 'Всё готово к старту'; hint = 'Рассадка опубликована. Запустите турнир — поздняя регистрация останется доступной.'; action = 'Начать турнир';
   } else if (tournament._count.seats > 0) {
     stage = 'PUBLISH'; title = 'Проверьте черновик рассадки'; hint = 'Места сформированы, но игроки их ещё не видят.'; action = 'Проверить и опубликовать';
   } else if (checkedIn > 0) {
@@ -80,4 +80,3 @@ export function deriveAdminWorkflow(tournament: AdminFocusTournament, now = new 
 
   return { stage, title, hint, action, completedSteps, steps };
 }
-

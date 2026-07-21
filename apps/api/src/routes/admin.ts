@@ -107,7 +107,31 @@ adminRouter.get('/overview', async (_req, res) => {
 
 adminRouter.get('/branding', async (_req, res) => {
   const settings = await prisma.clubSettings.findUnique({ where: { id: 'main' } });
-  return res.json({ ratingBannerImageData: settings?.ratingBannerImageData ?? null, updatedAt: settings?.updatedAt ?? null });
+  return res.json({ ratingBannerImageData: settings?.ratingBannerImageData ?? null, accentColor: settings?.accentColor ?? '#3B8CFF', updatedAt: settings?.updatedAt ?? null });
+});
+
+const accentColorSchema = z.object({ accentColor: z.string().regex(/^#[0-9A-Fa-f]{6}$/, 'Укажите цвет в формате #RRGGBB') });
+
+adminRouter.put('/branding/accent-color', async (req, res, next) => {
+  try {
+    const { accentColor: rawAccentColor } = accentColorSchema.parse(req.body);
+    const accentColor = rawAccentColor.toUpperCase();
+    const settings = await prisma.$transaction(async (tx) => {
+      const existing = await tx.clubSettings.findUnique({ where: { id: 'main' } });
+      const updated = await tx.clubSettings.upsert({
+        where: { id: 'main' },
+        update: { accentColor },
+        create: { id: 'main', accentColor }
+      });
+      await writeAudit(tx, {
+        actorId: req.auth!.userId, action: 'INTERFACE_COLOR_UPDATED', entityType: 'ClubSettings', entityId: updated.id,
+        summary: `Цвет интерфейса изменён на ${accentColor}`,
+        before: { accentColor: existing?.accentColor ?? '#3B8CFF' }, after: { accentColor }
+      });
+      return updated;
+    });
+    return res.json({ ratingBannerImageData: settings.ratingBannerImageData, accentColor: settings.accentColor, updatedAt: settings.updatedAt });
+  } catch (error) { return next(error); }
 });
 
 const ratingBannerSchema = z.object({
@@ -134,7 +158,7 @@ adminRouter.put('/branding/rating-banner', async (req, res, next) => {
       });
       return updated;
     });
-    return res.json({ ratingBannerImageData: settings.ratingBannerImageData, updatedAt: settings.updatedAt });
+    return res.json({ ratingBannerImageData: settings.ratingBannerImageData, accentColor: settings.accentColor, updatedAt: settings.updatedAt });
   } catch (error) { return next(error); }
 });
 
@@ -151,7 +175,7 @@ adminRouter.delete('/branding/rating-banner', async (req, res, next) => {
       });
       return updated;
     });
-    return res.json({ ratingBannerImageData: null, updatedAt: settings.updatedAt });
+    return res.json({ ratingBannerImageData: null, accentColor: settings.accentColor, updatedAt: settings.updatedAt });
   } catch (error) { return next(error); }
 });
 
@@ -639,7 +663,7 @@ adminRouter.delete('/tournaments/:id', async (req, res, next) => {
       include: { _count: { select: { results: true } } }
     });
     if (!tournament) return res.status(404).json({ message: 'Турнир не найден' });
-    if (tournament._count.results > 0) {
+    if (tournament._count.results > 0 && tournament.status !== TournamentStatus.CANCELLED) {
       return res.status(409).json({ message: 'Турнир с результатами нельзя удалить. Измените его статус на «Отменён».' });
     }
     await prisma.$transaction(async (tx) => {

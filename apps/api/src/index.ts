@@ -56,7 +56,7 @@ const authLimiter = rateLimit({
 app.use('/api', apiLimiter);
 app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
 app.use('/api/auth/telegram', authLimiter);
-app.use('/api/auth/browser/exchange', authLimiter);
+app.use('/api/auth/browser', authLimiter);
 app.use('/api/auth', authRouter);
 app.use('/api', publicRouter);
 app.use('/api/admin', adminRouter);

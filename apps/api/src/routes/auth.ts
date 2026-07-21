@@ -5,9 +5,16 @@ import { adminTelegramIds, env } from '../config.js';
 import { prisma } from '../db.js';
 import { AppError } from '../errors.js';
 import { createAccessToken, requireAuth } from '../middleware/auth.js';
-import { browserSessionExpiresAt, hashBrowserInviteToken } from '../services/browserAccess.js';
+import {
+  browserSessionExpiresAt,
+  hashBrowserInviteToken,
+  hashBrowserLoginCode,
+  normalizeBrowserLoginCode
+} from '../services/browserAccess.js';
 import { validateTelegramInitData, type TelegramUserData } from '../services/telegramAuth.js';
 import { createReferralForNewUser, ensureReferralCode, recordDailyAppOpen } from '../services/loyalty.js';
+import { getBotUsername } from '../bot.js';
+import { writeAudit } from '../services/audit.js';
 
 export const authRouter = Router();
 
@@ -70,6 +77,11 @@ authRouter.post('/telegram', async (req, res, next) => {
 
 const browserExchangeSchema = z.object({ token: z.string().min(40).max(256) });
 
+authRouter.get('/browser/config', async (_req, res) => {
+  const botUsername = await getBotUsername();
+  return res.json({ botUsername, botUrl: botUsername ? `https://t.me/${botUsername}?start=browser_login` : null });
+});
+
 authRouter.post('/browser/exchange', async (req, res, next) => {
   try {
     const { token } = browserExchangeSchema.parse(req.body);
@@ -110,6 +122,47 @@ authRouter.post('/browser/exchange', async (req, res, next) => {
   } catch (error) {
     return next(error);
   }
+});
+
+const browserCodeExchangeSchema = z.object({ code: z.string().trim().min(8).max(16) });
+
+authRouter.post('/browser/code/exchange', async (req, res, next) => {
+  try {
+    const { code: rawCode } = browserCodeExchangeSchema.parse(req.body);
+    const code = normalizeBrowserLoginCode(rawCode);
+    if (!/^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8}$/.test(code)) {
+      throw new AppError('Проверьте восьмизначный код из Telegram', 400, 'INVALID_BROWSER_CODE_FORMAT');
+    }
+    const now = new Date();
+    const codeHash = hashBrowserLoginCode(code);
+    const result = await prisma.$transaction(async (tx) => {
+      const loginCode = await tx.browserLoginCode.findFirst({
+        where: { codeHash, usedAt: null, expiresAt: { gt: now } },
+        include: { user: true }
+      });
+      if (!loginCode) throw new AppError('Код недействителен, уже использован или истёк', 401, 'INVALID_BROWSER_CODE');
+
+      const claimed = await tx.browserLoginCode.updateMany({
+        where: { id: loginCode.id, usedAt: null, expiresAt: { gt: now } },
+        data: { usedAt: now }
+      });
+      if (claimed.count !== 1) throw new AppError('Код уже использован', 401, 'USED_BROWSER_CODE');
+
+      const session = await tx.browserSession.create({ data: { userId: loginCode.userId, expiresAt: browserSessionExpiresAt(now) } });
+      await writeAudit(tx, {
+        actorId: loginCode.userId, action: 'BROWSER_CODE_USED', entityType: 'BrowserSession', entityId: session.id,
+        summary: `${loginCode.user.firstName} вошёл в браузере по коду из Telegram`,
+        metadata: { loginCodeId: loginCode.id }
+      });
+      return { user: loginCode.user, session };
+    });
+
+    const telegramId = result.user.telegramId.toString();
+    const role = adminTelegramIds.has(telegramId) ? UserRole.ADMIN : UserRole.PLAYER;
+    const user = result.user.role === role ? result.user : await prisma.user.update({ where: { id: result.user.id }, data: { role } });
+    const accessToken = createAccessToken({ sub: user.id, telegramId, role: user.role, authMethod: 'browser', sessionId: result.session.id }, '30d');
+    return res.json({ token: accessToken, user: serializeUser(user), expiresAt: result.session.expiresAt });
+  } catch (error) { return next(error); }
 });
 
 authRouter.get('/me', requireAuth, async (req, res) => {

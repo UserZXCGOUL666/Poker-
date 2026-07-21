@@ -38,6 +38,7 @@ export function ProfilePage() {
   const [referral, setReferral] = useState<ReferralInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [phoneMessage, setPhoneMessage] = useState<string | null>(null);
+  const [phoneFallbackUrl, setPhoneFallbackUrl] = useState<string | null>(null);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
   useEffect(() => { api<Profile>('/profile').then((value) => setProfile(normalizeProfile(value))).catch((e: Error) => setError(e.message)); }, []);
   useEffect(() => {
@@ -46,16 +47,40 @@ export function ProfilePage() {
   if (error) return <ErrorState message={error} />;
   if (!profile) return <Loading />;
 
-  function requestPhone() {
+  async function getPhoneFallbackUrl() {
+    try {
+      const config = await api<{ botUsername: string | null }>('/auth/browser/config');
+      const url = config.botUsername ? `https://t.me/${config.botUsername}?start=phone` : null;
+      setPhoneFallbackUrl(url);
+      return url;
+    } catch { return null; }
+  }
+
+  async function waitForSavedPhone() {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 1500));
+      try {
+        const next = normalizeProfile(await api<Profile>('/profile'));
+        setProfile(next);
+        if (next.hasPhoneNumber) { setPhoneMessage('Номер сохранён и виден только администраторам клуба.'); setPhoneFallbackUrl(null); return; }
+      } catch { /* Следующая проверка повторит запрос. */ }
+    }
+    await getPhoneFallbackUrl();
+    setPhoneMessage('Telegram подтвердил отправку, но номер ещё не появился. Откройте бота и нажмите кнопку передачи номера — это резервный надёжный способ.');
+  }
+
+  async function requestPhone() {
     const telegram = window.Telegram?.WebApp;
-    if (!telegram?.requestContact) { setPhoneMessage('Передать номер можно только внутри Telegram Mini App.'); return; }
-    setPhoneMessage(null);
+    setPhoneMessage(null); setPhoneFallbackUrl(null);
+    if (!telegram?.requestContact) {
+      await getPhoneFallbackUrl();
+      setPhoneMessage('Передать номер можно в личном чате с ботом.');
+      return;
+    }
     telegram.requestContact((shared) => {
       if (!shared) { setPhoneMessage('Номер не был передан. Вы сможете сделать это позже.'); return; }
-      setPhoneMessage('Контакт отправлен боту. Telegram пришлёт подтверждение после сохранения.');
-      window.setTimeout(() => {
-        void api<Profile>('/profile').then((next) => { const normalized = normalizeProfile(next); setProfile(normalized); if (normalized.hasPhoneNumber) setPhoneMessage('Номер сохранён и виден только администраторам клуба.'); });
-      }, 1800);
+      setPhoneMessage('Контакт отправлен. Проверяем сохранение…');
+      void waitForSavedPhone();
     });
   }
 
@@ -103,6 +128,7 @@ export function ProfilePage() {
       <div className="telegram-id card"><span>Ваш Telegram ID</span><code>{profile.telegramId}</code></div>
       <section className={`phone-share-card card ${profile.hasPhoneNumber ? 'saved' : ''}`}><span>{profile.hasPhoneNumber ? <CheckCircle2 /> : <Phone />}</span><div><strong>{profile.hasPhoneNumber ? 'Номер передан' : 'Оставить номер организаторам'}</strong><small>{profile.hasPhoneNumber ? `${profile.phoneNumberMasked} · доступен только администраторам` : 'Добровольно — для связи по турнирам и подаркам'}</small></div>{!profile.hasPhoneNumber && <button onClick={requestPhone}>Поделиться</button>}</section>
       {phoneMessage && <div className="phone-share-message">{phoneMessage}</div>}
+      {phoneFallbackUrl && !profile.hasPhoneNumber && <a className="phone-bot-fallback" href={phoneFallbackUrl}>Открыть бота и передать номер</a>}
       {profile.role === 'ADMIN' && <Link className="admin-entry card" to="/admin"><span><ShieldCheck /><span><strong>Управление клубом</strong><small>Турниры, игроки и программа лояльности</small></span></span><ChevronRight /></Link>}
     </>}
 

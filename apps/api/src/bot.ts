@@ -1,8 +1,14 @@
-import { Prisma } from '@prisma/client';
-import { Bot, InlineKeyboard, Keyboard } from 'grammy';
-import { env } from './config.js';
+import { Prisma, UserRole } from '@prisma/client';
+import { Bot, Context, InlineKeyboard, Keyboard } from 'grammy';
+import { adminTelegramIds, env } from './config.js';
 import { prisma } from './db.js';
 import { writeAudit } from './services/audit.js';
+import {
+  browserLoginCodeExpiresAt,
+  createBrowserLoginCode,
+  formatBrowserLoginCode,
+  hashBrowserLoginCode
+} from './services/browserAccess.js';
 
 export const bot = env.TELEGRAM_BOT_TOKEN ? new Bot(env.TELEGRAM_BOT_TOKEN) : null;
 let cachedBotUsername: string | null | undefined;
@@ -15,9 +21,42 @@ function miniAppUrlWithReferral(rawMatch: string | undefined) {
   return url.toString();
 }
 
+async function ensureBotUser(sender: { id: number; first_name: string; last_name?: string; username?: string }) {
+  const telegramId = String(sender.id);
+  const role = adminTelegramIds.has(telegramId) ? UserRole.ADMIN : UserRole.PLAYER;
+  return prisma.user.upsert({
+    where: { telegramId: BigInt(telegramId) },
+    update: { firstName: sender.first_name, lastName: sender.last_name, username: sender.username, role, lastSeenAt: new Date() },
+    create: { telegramId: BigInt(telegramId), firstName: sender.first_name, lastName: sender.last_name, username: sender.username, role }
+  });
+}
+
+async function sendPhoneRequest(ctx: Context) {
+  await ctx.reply('Нажмите кнопку ниже, чтобы добровольно передать организаторам ваш номер из Telegram.', {
+    reply_markup: new Keyboard().requestContact('📱 Поделиться номером').resized().oneTime()
+  });
+}
+
+async function sendBrowserLoginCode(ctx: Context) {
+  if (!ctx.from) return;
+  const user = await ensureBotUser(ctx.from);
+  const code = createBrowserLoginCode();
+  const now = new Date();
+  await prisma.$transaction(async (tx) => {
+    await tx.browserLoginCode.updateMany({ where: { userId: user.id, usedAt: null }, data: { usedAt: now } });
+    await tx.browserLoginCode.create({ data: { userId: user.id, codeHash: hashBrowserLoginCode(code), expiresAt: browserLoginCodeExpiresAt(now) } });
+  });
+  const loginUrl = new URL('/browser-login', env.MINI_APP_URL).toString();
+  await ctx.reply(`🔐 Код для входа в браузере:\n\n${formatBrowserLoginCode(code)}\n\nНа компьютере откройте ${loginUrl} и введите код. Он действует 10 минут и только один раз.`, {
+    reply_markup: new InlineKeyboard().url('Открыть страницу входа', loginUrl)
+  });
+}
+
 if (bot) {
   bot.command('start', async (ctx) => {
     const referralMatch = typeof ctx.match === 'string' ? ctx.match : undefined;
+    if (referralMatch === 'phone') return sendPhoneRequest(ctx);
+    if (referralMatch === 'browser_login') return sendBrowserLoginCode(ctx);
     const keyboard = new InlineKeyboard().webApp('Открыть Poker Club', miniAppUrlWithReferral(referralMatch));
     await ctx.reply(
       `Добро пожаловать в Poker Club, ${ctx.from?.first_name ?? 'игрок'}!\n\nЗдесь находятся игры, рейтинг сезона и ваши результаты.`,
@@ -32,10 +71,10 @@ if (bot) {
   });
 
   bot.command('phone', async (ctx) => {
-    await ctx.reply('Нажмите кнопку ниже, если хотите добровольно передать номер организаторам клуба.', {
-      reply_markup: new Keyboard().requestContact('📱 Поделиться номером').resized().oneTime()
-    });
+    await sendPhoneRequest(ctx);
   });
+
+  bot.command('login', sendBrowserLoginCode);
 
   bot.on('message:contact', async (ctx) => {
     const sender = ctx.from;
@@ -50,11 +89,7 @@ if (bot) {
       return;
     }
     const phoneNumber = `+${digits}`;
-    const user = await prisma.user.findUnique({ where: { telegramId: BigInt(sender.id) } });
-    if (!user) {
-      await ctx.reply('Сначала откройте Mini App и войдите в клуб, затем повторите отправку номера.');
-      return;
-    }
+    const user = await ensureBotUser(sender);
     try {
       await prisma.$transaction(async (tx) => {
         await tx.user.update({ where: { id: user.id }, data: { phoneNumber, phoneSharedAt: new Date() } });
@@ -99,6 +134,11 @@ export async function configureWebhook() {
     secret_token: env.TELEGRAM_WEBHOOK_SECRET,
     allowed_updates: ['message']
   });
+  await bot.api.setMyCommands([
+    { command: 'app', description: 'Открыть Poker Club' },
+    { command: 'login', description: 'Получить код для входа в браузере' },
+    { command: 'phone', description: 'Передать номер организаторам' }
+  ]);
 }
 
 export async function notifyAboutTournament(tournamentId: string) {

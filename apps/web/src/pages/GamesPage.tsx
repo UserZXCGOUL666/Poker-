@@ -45,18 +45,20 @@ export function GamesPage() {
     <div className="games-list">
       {filtered?.map((game) => {
         const date = tournamentDate(game.startsAt);
+        const registrationAvailable = (game.status === 'UPCOMING' || game.status === 'ACTIVE') && !game.registrationClosed && (!game.registrationDeadline || new Date(game.registrationDeadline) > new Date());
+        const canCancel = game.status === 'UPCOMING' && (game.registration?.status === 'REGISTERED' || game.registration?.status === 'WAITLISTED');
         return <article className="game-card card" key={game.id}>
           <div className="game-card-head"><div className="date-tile"><strong>{date.day}</strong><span>{date.month}</span></div><span className={`status status-${game.status.toLowerCase()}`}>{game.status === 'FINISHED' && <Check size={13} />}{labels[game.status]}</span></div>
           <h2>{game.title}</h2><p>{game.description}</p>
           <div className="game-meta"><span><Clock3 size={16} />{date.time}</span><span><Users size={16} />{game.participantCount || game._count?.results || 0}/{game.capacity}</span>{game.location && <span><MapPin size={16} />{game.location}</span>}</div>
-          {game.status === 'UPCOMING' && <div className={`registration-box registration-${game.registration?.status?.toLowerCase() ?? 'open'}`}>
+          {(game.status === 'UPCOMING' || game.status === 'ACTIVE') && <div className={`registration-box registration-${game.registration?.status?.toLowerCase() ?? 'open'}`}>
             {game.registration && game.registration.status !== 'CANCELLED' ? <>
               <span>{game.registration.status === 'WAITLISTED' ? <ListOrdered /> : <UserCheck />}</span>
-              <div><strong>{game.registration.status === 'WAITLISTED' ? 'Вы в листе ожидания' : game.registration.status === 'CHECKED_IN' ? 'Присутствие подтверждено' : 'Вы участвуете'}</strong><small>{game.registration.status === 'WAITLISTED' ? `Позиция в очереди: ${game.registration.waitlistPosition ?? '—'}` : 'Место в основном списке подтверждено'}</small></div>
-              <button disabled={savingId === game.id} onClick={() => void cancel(game)} aria-label="Отменить участие"><X size={15} />Отменить</button>
+              <div><strong>{game.registration.status === 'WAITLISTED' ? 'Вы в листе ожидания' : game.registration.status === 'CHECKED_IN' || game.registration.status === 'PLAYED' ? 'Присутствие подтверждено' : 'Вы участвуете'}</strong><small>{game.registration.status === 'WAITLISTED' ? `Позиция в очереди: ${game.registration.waitlistPosition ?? '—'}` : game.registration.status === 'CHECKED_IN' || game.registration.status === 'PLAYED' ? 'Чек-ин зафиксирован и не отменяется' : game.status === 'ACTIVE' ? 'Поздняя регистрация подтверждена' : 'Место в основном списке подтверждено'}</small></div>
+              {canCancel && <button disabled={savingId === game.id} onClick={() => void cancel(game)} aria-label="Отменить участие"><X size={15} />Отменить</button>}
             </> : <>
-              <span><UserCheck /></span><div><strong>{game.registrationClosed ? 'Регистрация закрыта' : game.participantCount >= game.capacity ? 'Основной список заполнен' : 'Записаться на турнир'}</strong><small>{game.registrationClosed ? 'Администратор остановил приём участников' : game.participantCount >= game.capacity ? 'Вы попадёте в лист ожидания' : `Свободно мест: ${Math.max(0, game.capacity - game.participantCount)}`}</small></div>
-              <button className="join-game" disabled={savingId === game.id || game.registrationClosed} onClick={() => void register(game)}>{savingId === game.id ? 'Подождите…' : game.participantCount >= game.capacity ? 'В очередь' : 'Участвовать'}</button>
+              <span><UserCheck /></span><div><strong>{!registrationAvailable ? 'Регистрация закрыта' : game.participantCount >= game.capacity ? 'Основной список заполнен' : game.status === 'ACTIVE' ? 'Поздняя регистрация' : 'Записаться на турнир'}</strong><small>{!registrationAvailable ? 'Администратор остановил приём участников' : game.participantCount >= game.capacity ? 'Вы попадёте в лист ожидания' : game.status === 'ACTIVE' ? 'Турнир уже начался, но присоединиться ещё можно' : `Свободно мест: ${Math.max(0, game.capacity - game.participantCount)}`}</small></div>
+              <button className="join-game" disabled={savingId === game.id || !registrationAvailable} onClick={() => void register(game)}>{savingId === game.id ? 'Подождите…' : game.participantCount >= game.capacity ? 'В очередь' : 'Участвовать'}</button>
             </>}
           </div>}
         </article>;

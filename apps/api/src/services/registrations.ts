@@ -21,7 +21,7 @@ export async function registerForTournament(tournamentId: string, userId: string
     const tournament = await tx.tournament.findUnique({ where: { id: tournamentId } });
     if (!tournament) throw new AppError('Турнир не найден', 404, 'TOURNAMENT_NOT_FOUND');
     const now = new Date();
-    if (tournament.status !== 'UPCOMING') throw new AppError('Регистрация доступна только на предстоящий турнир', 409, 'REGISTRATION_UNAVAILABLE');
+    if (!canRegisterForTournamentStatus(tournament.status)) throw new AppError('Регистрация на этот турнир недоступна', 409, 'REGISTRATION_UNAVAILABLE');
     if (tournament.registrationClosed) throw new AppError('Администратор закрыл регистрацию', 409, 'REGISTRATION_CLOSED');
     if (tournament.registrationDeadline && tournament.registrationDeadline <= now) throw new AppError('Срок регистрации завершён', 409, 'REGISTRATION_DEADLINE');
     const user = await tx.user.findUnique({ where: { id: userId }, select: { id: true, telegramId: true, firstName: true, lastName: true, username: true } });
@@ -61,6 +61,9 @@ export async function cancelTournamentRegistration(registrationId: string, actor
       include: { tournament: true, user: { select: { id: true, telegramId: true, firstName: true, lastName: true, username: true } } }
     });
     if (!registration) throw new AppError('Регистрация не найдена', 404, 'REGISTRATION_NOT_FOUND');
+    if (attendedStatuses.includes(registration.status)) {
+      throw new AppError('Чек-ин уже подтверждён и не может быть отменён', 409, 'CHECK_IN_IRREVERSIBLE');
+    }
     if (!actor.actorIsAdmin && registration.userId !== actor.requestedByUserId) throw new AppError('Нельзя изменить чужую регистрацию', 403, 'FORBIDDEN');
     if (!actor.actorIsAdmin && !canPlayerCancelRegistration(registration.tournament.status, registration.status)) {
       throw new AppError('Самостоятельная отмена доступна только до начала турнира', 409, 'CANCELLATION_UNAVAILABLE');
@@ -100,6 +103,9 @@ export async function updateRegistrationStatus(registrationId: string, status: T
     });
     if (!current) throw new AppError('Регистрация не найдена', 404, 'REGISTRATION_NOT_FOUND');
     if (current.status === status) return { registration: current, user: current.user, promoted: null, tournament: current.tournament, duplicate: true, previousStatus: current.status };
+    if (!canTransitionRegistrationStatus(current.status, status)) {
+      throw new AppError('Чек-ин уже подтверждён и не может быть отменён', 409, 'CHECK_IN_IRREVERSIBLE');
+    }
 
     if (occupiedStatuses.includes(status) && !occupiedStatuses.includes(current.status)) {
       const occupied = await tx.tournamentRegistration.count({ where: { tournamentId: current.tournamentId, status: { in: occupiedStatuses } } });
@@ -112,7 +118,7 @@ export async function updateRegistrationStatus(registrationId: string, status: T
       data: {
         status,
         promotedAt: status === TournamentRegistrationStatus.REGISTERED && current.status === TournamentRegistrationStatus.WAITLISTED ? now : current.promotedAt,
-        checkedInAt: status === TournamentRegistrationStatus.CHECKED_IN ? now : null,
+        checkedInAt: attendedStatuses.includes(status) ? current.checkedInAt ?? now : current.checkedInAt,
         cancelledAt: null
       }
     });
@@ -194,6 +200,16 @@ export function canPlayerCancelRegistration(tournamentStatus: string, registrati
   return tournamentStatus === 'UPCOMING' && (
     registrationStatus === TournamentRegistrationStatus.REGISTERED || registrationStatus === TournamentRegistrationStatus.WAITLISTED
   );
+}
+
+export function canRegisterForTournamentStatus(tournamentStatus: string) {
+  return tournamentStatus === 'UPCOMING' || tournamentStatus === 'ACTIVE';
+}
+
+export function canTransitionRegistrationStatus(current: TournamentRegistrationStatus, next: TournamentRegistrationStatus) {
+  if (current === TournamentRegistrationStatus.PLAYED) return false;
+  if (current === TournamentRegistrationStatus.CHECKED_IN) return next === TournamentRegistrationStatus.PLAYED;
+  return true;
 }
 
 export function shouldNotifyRegistrationStatusChange(previousStatus: TournamentRegistrationStatus | undefined, status: TournamentRegistrationStatus) {

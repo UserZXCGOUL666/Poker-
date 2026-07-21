@@ -86,6 +86,7 @@ model User {
   pointChangesMade      PointTransaction[]       @relation("PointAdmin")
   browserInvites        BrowserAccessInvite[]    @relation("BrowserInviteRecipient")
   browserInvitesCreated BrowserAccessInvite[]    @relation("BrowserInviteAdmin")
+  browserLoginCodes     BrowserLoginCode[]
   browserSessions       BrowserSession[]
   registrations         TournamentRegistration[]
   tags                  UserTag[]
@@ -132,6 +133,19 @@ model BrowserSession {
 
   @@index([userId, expiresAt])
   @@index([revokedAt, expiresAt])
+}
+
+model BrowserLoginCode {
+  id        String    @id @default(cuid())
+  codeHash  String    @unique
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([usedAt, expiresAt])
 }
 
 model Season {
@@ -351,6 +365,7 @@ model TournamentSeat {
 model ClubSettings {
   id                    String   @id @default("main")
   ratingBannerImageData String?  @db.Text
+  accentColor           String   @default("#3B8CFF")
   updatedAt             DateTime @updatedAt
 }
 

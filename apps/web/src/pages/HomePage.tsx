@@ -21,7 +21,7 @@ export function HomePage() {
   return <div className="page home-page">
     <p className="season-line">{data.season?.name ?? 'Новый сезон'} · Неделя {data.week}</p>
 
-    <section className={`rating-hero ${data.branding?.hasRatingBanner ? 'rating-hero-custom' : ''}`} style={data.branding?.hasRatingBanner ? { backgroundImage: `linear-gradient(90deg, rgba(5, 37, 88, .94), rgba(7, 61, 145, .58)), url(${apiAssetUrl(`/branding/rating-banner?v=${encodeURIComponent(data.branding.updatedAt ?? '')}`)})` } : undefined}>
+    <section className={`rating-hero ${data.branding?.hasRatingBanner ? 'rating-hero-custom' : ''}`} style={data.branding?.hasRatingBanner ? { backgroundImage: `linear-gradient(90deg, rgba(var(--accent-rgb), .94), rgba(var(--accent-rgb), .58)), url(${apiAssetUrl(`/branding/rating-banner?v=${encodeURIComponent(data.branding.updatedAt ?? '')}`)})` } : undefined}>
       <div className="rating-watermark">♠</div>
       <div className="rating-top">
         <div><span>Ваш рейтинг</span><div className="rank-number">#{data.user.rank}<small>из {data.user.totalUsers}</small></div></div>

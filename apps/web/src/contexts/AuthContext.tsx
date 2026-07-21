@@ -7,6 +7,7 @@ type AuthState = {
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
+  loginWithBrowserCode: (code: string) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -19,6 +20,15 @@ export function AuthProvider({ children }: PropsWithChildren) {
   const refresh = async () => {
     const me = await api<User>('/auth/me');
     setUser(me);
+  };
+
+  const loginWithBrowserCode = async (code: string) => {
+    const result = await post<{ token: string; user: User; expiresAt: string }>('/auth/browser/code/exchange', { code });
+    localStorage.setItem('poker-club-token', result.token);
+    localStorage.setItem('poker-club-auth-method', 'browser');
+    setError(null);
+    setUser(result.user);
+    window.history.replaceState({}, '', '/');
   };
 
   useEffect(() => {
@@ -44,10 +54,6 @@ export function AuthProvider({ children }: PropsWithChildren) {
           if (active) setUser(result.user);
           return;
         }
-        if (window.location.pathname === '/browser-login') {
-          throw new Error('В ссылке отсутствует код доступа. Запросите новое приглашение у администратора.');
-        }
-
         const existing = localStorage.getItem('poker-club-token');
         if (existing) {
           try {
@@ -58,11 +64,13 @@ export function AuthProvider({ children }: PropsWithChildren) {
             const wasBrowserSession = localStorage.getItem('poker-club-auth-method') === 'browser';
             localStorage.removeItem('poker-club-token');
             localStorage.removeItem('poker-club-auth-method');
-            if (wasBrowserSession && !telegram?.initData) {
+            if (wasBrowserSession && !telegram?.initData && window.location.pathname !== '/browser-login') {
               throw new Error('Браузерная сессия истекла или была отозвана. Запросите новую ссылку у администратора.');
             }
           }
         }
+
+        if (window.location.pathname === '/browser-login' && !telegram?.initData) return;
 
         const devId = import.meta.env.VITE_DEV_TELEGRAM_ID;
         const referralCode = sessionStorage.getItem('poker-club-referral') ?? undefined;
@@ -90,7 +98,7 @@ export function AuthProvider({ children }: PropsWithChildren) {
     return () => { active = false; };
   }, []);
 
-  const value = useMemo(() => ({ user, loading, error, refresh }), [user, loading, error]);
+  const value = useMemo(() => ({ user, loading, error, refresh, loginWithBrowserCode }), [user, loading, error]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
