@@ -12,6 +12,7 @@ const schema = z.object({
   PUBLIC_API_URL: z.string().url().optional(),
   RENDER_EXTERNAL_HOSTNAME: z.string().optional(),
   ADMIN_TELEGRAM_IDS: z.string().default(''),
+  ADMIN_CONTACT: z.string().max(160).optional(),
   CLUB_TIMEZONE: z.string().default('Europe/Moscow'),
   ALLOW_DEV_AUTH: z.enum(['true', 'false']).default('false').transform((value) => value === 'true')
 }).superRefine((value, ctx) => {

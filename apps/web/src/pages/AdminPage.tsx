@@ -21,6 +21,31 @@ import { AnalyticsAdminTab } from './AnalyticsAdminTab';
 type AdminSection = 'overview' | 'players' | 'tournaments' | 'seating' | 'loyalty' | 'analytics' | 'audit' | 'access' | 'settings' | 'more';
 type AdminIntentKind = 'points' | 'newTournament' | 'results' | 'participants' | 'invite' | 'openTournament' | 'seating';
 type AdminIntent = { kind: AdminIntentKind; nonce: number; targetId?: string } | null;
+
+const adminSectionValues: AdminSection[] = ['overview', 'players', 'tournaments', 'seating', 'loyalty', 'analytics', 'audit', 'access', 'settings', 'more'];
+const adminIntentValues: AdminIntentKind[] = ['points', 'newTournament', 'results', 'participants', 'invite', 'openTournament', 'seating'];
+
+function initialAdminSection(): AdminSection {
+  const value = new URLSearchParams(window.location.search).get('section') as AdminSection | null;
+  return value && adminSectionValues.includes(value) ? value : 'overview';
+}
+
+function initialAdminIntent(): AdminIntent {
+  const params = new URLSearchParams(window.location.search);
+  const kind = params.get('intent') as AdminIntentKind | null;
+  if (!kind || !adminIntentValues.includes(kind)) return null;
+  return { kind, targetId: params.get('target') ?? undefined, nonce: Date.now() };
+}
+
+function replaceAdminLocation(section: AdminSection, kind?: AdminIntentKind, targetId?: string) {
+  const url = new URL(window.location.href);
+  url.pathname = '/admin';
+  url.search = '';
+  if (section !== 'overview') url.searchParams.set('section', section);
+  if (kind) url.searchParams.set('intent', kind);
+  if (targetId) url.searchParams.set('target', targetId);
+  window.history.replaceState({}, '', `${url.pathname}${url.search}`);
+}
 type AdminUser = Pick<User, 'id' | 'telegramId' | 'firstName' | 'lastName' | 'username' | 'role' | 'points'> & {
   phoneNumber: string | null;
   phoneSharedAt: string | null;
@@ -103,8 +128,8 @@ const sectionTitles: Record<AdminSection, string> = {
 
 export function AdminPage() {
   const { user } = useAuth();
-  const [section, setSection] = useState<AdminSection>('overview');
-  const [intent, setIntent] = useState<AdminIntent>(null);
+  const [section, setSection] = useState<AdminSection>(initialAdminSection);
+  const [intent, setIntent] = useState<AdminIntent>(initialAdminIntent);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
@@ -157,6 +182,7 @@ export function AdminPage() {
   function navigate(next: AdminSection, kind?: AdminIntentKind, targetId?: string) {
     setSection(next);
     setIntent(kind ? { kind, targetId, nonce: Date.now() } : null);
+    replaceAdminLocation(next, kind, targetId);
   }
   function done(message: string) {
     setNotice(message);
@@ -1204,7 +1230,8 @@ async function prepareRatingBanner(file: File) {
 function isSessionActive(session: BrowserSession) { return !session.revokedAt && new Date(session.expiresAt) > new Date(); }
 function registrationStatusLabel(value: TournamentRegistrationStatus) { return { REGISTERED: 'В основном списке', WAITLISTED: 'Лист ожидания', CHECKED_IN: 'Присутствие подтверждено', PLAYED: 'Сыграл', CANCELLED: 'Отменено' }[value]; }
 function auditActionLabel(value: string) {
+  if (value === 'BROADCAST_SENT') return 'Рассылка';
   const labels: Record<string, string> = { POINTS_AWARDED: 'Начисление очков', POINTS_DEDUCTED: 'Списание очков', POINTS_BATCH_CREATED: 'Пакет очков', POINTS_REVERSED: 'Отмена операции', TOURNAMENT_CREATED: 'Создание турнира', TOURNAMENT_UPDATED: 'Изменение турнира', TOURNAMENT_DELETED: 'Удаление турнира', TOURNAMENT_RESULTS_UPDATED: 'Результаты', REGISTRATION_CREATED: 'Регистрация', WAITLIST_JOINED: 'Лист ожидания', REGISTRATION_STATUS_CHANGED: 'Статус заявки', REGISTRATION_CANCELLED: 'Отмена заявки', WAITLIST_PROMOTED: 'Перевод из очереди', SEASON_CREATED: 'Создание сезона', SEASON_UPDATED: 'Изменение сезона', SEASON_FINALIZED: 'Финализация сезона', USER_NOTE_UPDATED: 'Заметка', USER_TAG_ADDED: 'Добавление тега', USER_TAG_REMOVED: 'Удаление тега', PHONE_SHARED: 'Передача телефона', TAG_CREATED: 'Создание тега', TAG_UPDATED: 'Изменение тега', TAG_DELETED: 'Удаление тега', BROWSER_INVITE_CREATED: 'Браузерное приглашение', BROWSER_CODE_USED: 'Вход по Telegram-коду', BROWSER_SESSION_REVOKED: 'Отзыв доступа', TOURNAMENT_NOTIFICATION_SENT: 'Уведомление', TOURNAMENT_TEMPLATE_CREATED: 'Создание шаблона', TOURNAMENT_TEMPLATE_UPDATED: 'Изменение шаблона', TOURNAMENT_TEMPLATE_DELETED: 'Удаление шаблона', RECURRING_TOURNAMENT_CREATED: 'Турнир по расписанию', REASON_PRESET_CREATED: 'Создание причины', REASON_PRESET_UPDATED: 'Изменение причины', SEATING_GENERATED: 'Создание рассадки', SEATING_REGENERATED: 'Пересоздание рассадки', PLAYER_SEATED: 'Посадка игрока', PLAYER_MOVED: 'Пересадка игрока', SEATS_SWAPPED: 'Обмен местами', PLAYER_UNSEATED: 'Снятие с места', SEATING_PUBLISHED: 'Публикация рассадки', SEATING_UNPUBLISHED: 'Скрытие рассадки', RATING_BANNER_UPDATED: 'Фон рейтинга', RATING_BANNER_REMOVED: 'Удаление фона рейтинга', INTERFACE_COLOR_UPDATED: 'Цвет интерфейса' };
   return labels[value] ?? value.split('_').join(' ').toLowerCase();
 }
-function auditEntityLabel(value: string) { return ({ User: 'Игроки', Tournament: 'Турниры', TournamentSeating: 'Рассадка', ClubSettings: 'Оформление', Season: 'Сезоны', PointTransaction: 'Очки', PointBatch: 'Пакеты очков', TournamentRegistration: 'Регистрации', TournamentTemplate: 'Шаблоны турниров', PlayerTag: 'Теги', BrowserSession: 'Доступ', BrowserInvite: 'Приглашения' } as Record<string, string>)[value] ?? value; }
+function auditEntityLabel(value: string) { if (value === 'TelegramBroadcast') return 'Рассылки'; return ({ User: 'Игроки', Tournament: 'Турниры', TournamentSeating: 'Рассадка', ClubSettings: 'Оформление', Season: 'Сезоны', PointTransaction: 'Очки', PointBatch: 'Пакеты очков', TournamentRegistration: 'Регистрации', TournamentTemplate: 'Шаблоны турниров', PlayerTag: 'Теги', BrowserSession: 'Доступ', BrowserInvite: 'Приглашения' } as Record<string, string>)[value] ?? value; }
