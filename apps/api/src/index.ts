@@ -6,7 +6,7 @@ import { rateLimit } from 'express-rate-limit';
 import { ZodError } from 'zod';
 import { AppError } from './errors.js';
 import { bot, configureWebhook } from './bot.js';
-import { env } from './config.js';
+import { env, telegramWebhookSecret } from './config.js';
 import { prisma } from './db.js';
 import { adminRouter } from './routes/admin.js';
 import { authRouter } from './routes/auth.js';
@@ -32,7 +32,7 @@ app.get('/health', async (_req, res) => {
 
 app.post('/telegram/webhook', async (req, res) => {
   if (!bot) return res.status(503).json({ message: 'Telegram bot не настроен' });
-  if (env.TELEGRAM_WEBHOOK_SECRET && req.header('x-telegram-bot-api-secret-token') !== env.TELEGRAM_WEBHOOK_SECRET) {
+  if (telegramWebhookSecret && req.header('x-telegram-bot-api-secret-token') !== telegramWebhookSecret) {
     return res.status(401).end();
   }
   await bot.handleUpdate(req.body);

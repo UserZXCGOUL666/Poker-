@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 export const PLAYER_BUTTONS = {
   openClub: '🎮 ОТКРЫТЬ КЛУБ',
   tournaments: '🏆 ТУРНИРЫ',
@@ -20,6 +22,14 @@ export const ADMIN_BUTTONS = {
 } as const;
 
 export type MiniAppParams = Record<string, string | number | undefined>;
+
+const TELEGRAM_WEBHOOK_SECRET_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
+
+export function normalizeTelegramWebhookSecret(value?: string) {
+  if (!value) return undefined;
+  if (TELEGRAM_WEBHOOK_SECRET_PATTERN.test(value)) return value;
+  return createHash('sha256').update(value).digest('hex');
+}
 
 export function hasAdminAccess(telegramId: string | number, adminIds: ReadonlySet<string>) {
   return adminIds.has(String(telegramId));

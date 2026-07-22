@@ -1,6 +1,6 @@
 import { Prisma, TournamentRegistrationStatus, UserRole } from '@prisma/client';
 import { Bot, Context, InlineKeyboard, Keyboard } from 'grammy';
-import { adminTelegramIds, env } from './config.js';
+import { adminTelegramIds, env, telegramWebhookSecret } from './config.js';
 import { prisma } from './db.js';
 import { writeAudit } from './services/audit.js';
 import {
@@ -472,7 +472,7 @@ export async function configureWebhook() {
   const publicUrl = env.PUBLIC_API_URL ?? (env.RENDER_EXTERNAL_HOSTNAME ? `https://${env.RENDER_EXTERNAL_HOSTNAME}` : undefined);
   if (!bot || !publicUrl) return;
   await bot.api.setWebhook(`${publicUrl.replace(/\/$/, '')}/telegram/webhook`, {
-    secret_token: env.TELEGRAM_WEBHOOK_SECRET,
+    secret_token: telegramWebhookSecret,
     allowed_updates: ['message', 'callback_query']
   });
   await bot.api.setMyCommands([

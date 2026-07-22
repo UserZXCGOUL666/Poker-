@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { displayName, hasAdminAccess, miniAppUrl, normalizePhoneNumber, registrationLabel } from './botHelpers.js';
+import {
+  displayName,
+  hasAdminAccess,
+  miniAppUrl,
+  normalizePhoneNumber,
+  normalizeTelegramWebhookSecret,
+  registrationLabel
+} from './botHelpers.js';
 
 describe('bot helpers', () => {
   it('builds Mini App deep links without keeping stale query parameters', () => {
@@ -28,5 +35,15 @@ describe('bot helpers', () => {
     const adminIds = new Set(['111', '222']);
     expect(hasAdminAccess(111, adminIds)).toBe(true);
     expect(hasAdminAccess(333, adminIds)).toBe(false);
+  });
+
+  it('keeps Telegram-safe webhook secrets unchanged', () => {
+    expect(normalizeTelegramWebhookSecret('valid_Secret-123')).toBe('valid_Secret-123');
+  });
+
+  it('derives a Telegram-safe secret from Render-generated values', () => {
+    const normalized = normalizeTelegramWebhookSecret('render/generated+secret=');
+    expect(normalized).toMatch(/^[a-f0-9]{64}$/);
+    expect(normalized).toBe(normalizeTelegramWebhookSecret('render/generated+secret='));
   });
 });

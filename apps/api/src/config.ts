@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import { z } from 'zod';
+import { normalizeTelegramWebhookSecret } from './botHelpers.js';
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -29,6 +30,7 @@ const schema = z.object({
 });
 
 export const env = schema.parse(process.env);
+export const telegramWebhookSecret = normalizeTelegramWebhookSecret(env.TELEGRAM_WEBHOOK_SECRET);
 export const adminTelegramIds = new Set(
   env.ADMIN_TELEGRAM_IDS.split(',').map((value) => value.trim()).filter(Boolean)
 );
