@@ -23,6 +23,17 @@ export const ADMIN_BUTTONS = {
 
 export type MiniAppParams = Record<string, string | number | undefined>;
 
+export function createRetryableInitializer(initializer: () => Promise<void>) {
+  let pending: Promise<void> | null = null;
+  return async () => {
+    pending ??= initializer().catch((error) => {
+      pending = null;
+      throw error;
+    });
+    await pending;
+  };
+}
+
 const TELEGRAM_WEBHOOK_SECRET_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
 
 export function normalizeTelegramWebhookSecret(value?: string) {

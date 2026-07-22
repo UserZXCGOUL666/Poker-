@@ -12,6 +12,7 @@ import {
 import {
   ADMIN_BUTTONS,
   PLAYER_BUTTONS,
+  createRetryableInitializer,
   displayName,
   hasAdminAccess,
   miniAppUrl,
@@ -21,6 +22,7 @@ import {
 
 export const bot = env.TELEGRAM_BOT_TOKEN ? new Bot(env.TELEGRAM_BOT_TOKEN) : null;
 let cachedBotUsername: string | null | undefined;
+const initializeBotInstance = bot ? createRetryableInitializer(() => bot.init()) : null;
 
 type BotSender = { id: number; first_name: string; last_name?: string; username?: string };
 type BroadcastAudience = 'all' | 'active' | 'tournament';
@@ -468,9 +470,14 @@ export async function getBotUsername() {
   return cachedBotUsername;
 }
 
+export async function initializeBot() {
+  await initializeBotInstance?.();
+}
+
 export async function configureWebhook() {
   const publicUrl = env.PUBLIC_API_URL ?? (env.RENDER_EXTERNAL_HOSTNAME ? `https://${env.RENDER_EXTERNAL_HOSTNAME}` : undefined);
   if (!bot || !publicUrl) return;
+  await initializeBot();
   await bot.api.setWebhook(`${publicUrl.replace(/\/$/, '')}/telegram/webhook`, {
     secret_token: telegramWebhookSecret,
     allowed_updates: ['message', 'callback_query']

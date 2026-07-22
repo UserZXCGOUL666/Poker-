@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createRetryableInitializer,
   displayName,
   hasAdminAccess,
   miniAppUrl,
@@ -7,6 +8,32 @@ import {
   normalizeTelegramWebhookSecret,
   registrationLabel
 } from './botHelpers.js';
+
+describe('retryable initialization', () => {
+  it('shares one initialization between concurrent webhook requests', async () => {
+    let calls = 0;
+    const initialize = createRetryableInitializer(async () => {
+      calls += 1;
+      await Promise.resolve();
+    });
+
+    await Promise.all([initialize(), initialize(), initialize()]);
+
+    expect(calls).toBe(1);
+  });
+
+  it('allows a retry after a failed initialization', async () => {
+    let calls = 0;
+    const initialize = createRetryableInitializer(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('temporary Telegram error');
+    });
+
+    await expect(initialize()).rejects.toThrow('temporary Telegram error');
+    await expect(initialize()).resolves.toBeUndefined();
+    expect(calls).toBe(2);
+  });
+});
 
 describe('bot helpers', () => {
   it('builds Mini App deep links without keeping stale query parameters', () => {

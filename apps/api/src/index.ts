@@ -5,7 +5,7 @@ import helmet from 'helmet';
 import { rateLimit } from 'express-rate-limit';
 import { ZodError } from 'zod';
 import { AppError } from './errors.js';
-import { bot, configureWebhook } from './bot.js';
+import { bot, configureWebhook, initializeBot } from './bot.js';
 import { env, telegramWebhookSecret } from './config.js';
 import { prisma } from './db.js';
 import { adminRouter } from './routes/admin.js';
@@ -35,6 +35,7 @@ app.post('/telegram/webhook', async (req, res) => {
   if (telegramWebhookSecret && req.header('x-telegram-bot-api-secret-token') !== telegramWebhookSecret) {
     return res.status(401).end();
   }
+  await initializeBot();
   await bot.handleUpdate(req.body);
   return res.status(200).end();
 });
@@ -78,7 +79,13 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 
 const server = app.listen(env.PORT, async () => {
   console.log(`Poker Club API запущен на порту ${env.PORT}`);
-  try { await configureWebhook(); } catch (error) { console.error('Не удалось настроить webhook', error); }
+  try {
+    await initializeBot();
+    await configureWebhook();
+    if (bot) console.log('Telegram bot и webhook готовы');
+  } catch (error) {
+    console.error('Не удалось инициализировать Telegram bot или настроить webhook', error);
+  }
   try { await generateRecurringTournaments(); } catch (error) { console.error('Не удалось создать повторяющиеся турниры', error); }
 });
 
