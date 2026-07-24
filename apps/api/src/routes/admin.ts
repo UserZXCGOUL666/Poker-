@@ -41,7 +41,7 @@ adminRouter.get('/overview', async (_req, res) => {
     prisma.pointTransaction.findMany({
       orderBy: { createdAt: 'desc' }, take: 6,
       include: {
-        user: { select: { id: true, firstName: true, lastName: true, username: true } },
+        user: { select: { id: true, firstName: true, lastName: true, username: true, nickname: true } },
         createdBy: { select: { id: true, firstName: true, lastName: true } },
         reversedBy: { select: { id: true } }
       }
@@ -193,7 +193,7 @@ adminRouter.get('/users', async (req, res) => {
     orderBy: [{ points: 'desc' }, { firstName: 'asc' }],
     take: 1000,
     select: {
-      id: true, telegramId: true, firstName: true, lastName: true, username: true, role: true, points: true, clubXp: true, phoneNumber: true, phoneSharedAt: true,
+      id: true, telegramId: true, firstName: true, lastName: true, username: true, nickname: true, photoUrl: true, role: true, points: true, clubXp: true, phoneNumber: true, phoneSharedAt: true,
       tags: { include: { tag: true } },
       results: { orderBy: { createdAt: 'desc' }, take: 1, select: { createdAt: true, tournament: { select: { startsAt: true } } } },
       _count: { select: { results: true, browserSessions: { where: { revokedAt: null, expiresAt: { gt: new Date() } } }, registrations: true } }
@@ -230,7 +230,8 @@ adminRouter.get('/users/:id', async (req, res) => {
     }
   });
   if (!user) return res.status(404).json({ message: 'Пользователь не найден' });
-  return res.json({ ...user, telegramId: user.telegramId.toString(), tags: user.tags.map((item) => item.tag) });
+  const { profilePhotoData: _profilePhotoData, ...safeUser } = user;
+  return res.json({ ...safeUser, telegramId: user.telegramId.toString(), tags: user.tags.map((item) => item.tag) });
 });
 
 const userNoteSchema = z.object({ note: z.string().max(2000).nullable() });
@@ -320,7 +321,7 @@ adminRouter.post('/browser-access/invites', async (req, res, next) => {
     const { userId } = browserInviteSchema.parse(req.body);
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, telegramId: true, firstName: true, lastName: true, username: true }
+      select: { id: true, telegramId: true, firstName: true, lastName: true, username: true, nickname: true }
     });
     if (!user) return res.status(404).json({ message: 'Пользователь не найден' });
 
@@ -359,7 +360,7 @@ adminRouter.get('/browser-access/sessions', async (req, res) => {
     orderBy: { createdAt: 'desc' },
     take: 100,
     include: {
-      user: { select: { id: true, telegramId: true, firstName: true, lastName: true, username: true } }
+      user: { select: { id: true, telegramId: true, firstName: true, lastName: true, username: true, nickname: true } }
     }
   });
   return res.json(sessions.map((session) => ({
@@ -453,7 +454,7 @@ adminRouter.get('/points/history', async (req, res, next) => {
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: query.take,
       include: {
-        user: { select: { id: true, firstName: true, lastName: true, username: true, points: true } },
+        user: { select: { id: true, firstName: true, lastName: true, username: true, nickname: true, points: true } },
         createdBy: { select: { id: true, firstName: true, lastName: true } },
         season: { select: { id: true, name: true, isActive: true, finalizedAt: true } },
         reversedBy: { select: { id: true, createdAt: true } },
@@ -500,7 +501,7 @@ adminRouter.patch('/reason-presets/:id', async (req, res, next) => {
 });
 
 adminRouter.get('/seasons', async (_req, res) => {
-  const seasons = await prisma.season.findMany({ orderBy: { startsAt: 'desc' }, include: { finalizedBy: { select: { id: true, firstName: true, lastName: true } }, standings: { orderBy: { rank: 'asc' }, take: 3, include: { user: { select: { id: true, firstName: true, lastName: true, username: true } } } }, _count: { select: { tournaments: true, standings: true } } } });
+  const seasons = await prisma.season.findMany({ orderBy: { startsAt: 'desc' }, include: { finalizedBy: { select: { id: true, firstName: true, lastName: true } }, standings: { orderBy: { rank: 'asc' }, take: 3, include: { user: { select: { id: true, firstName: true, lastName: true, username: true, nickname: true } } } }, _count: { select: { tournaments: true, standings: true } } } });
   return res.json(seasons);
 });
 
@@ -607,10 +608,10 @@ adminRouter.get('/tournaments/:id', async (req, res) => {
     where: { id: req.params.id },
     include: {
       season: true,
-      results: { orderBy: { place: 'asc' }, include: { user: { select: { id: true, firstName: true, lastName: true, username: true } } } },
+      results: { orderBy: { place: 'asc' }, include: { user: { select: { id: true, firstName: true, lastName: true, username: true, nickname: true } } } },
       registrations: {
         orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
-        include: { user: { select: { id: true, telegramId: true, firstName: true, lastName: true, username: true, points: true, tags: { include: { tag: true } } } } }
+        include: { user: { select: { id: true, telegramId: true, firstName: true, lastName: true, username: true, nickname: true, points: true, tags: { include: { tag: true } } } } }
       },
       pointBatches: { orderBy: { createdAt: 'desc' }, take: 5, include: { _count: { select: { transactions: true } } } }
     }

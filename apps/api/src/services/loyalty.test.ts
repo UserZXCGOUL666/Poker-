@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculateVisitStreak, clubDayKey, dailyIndex } from './loyalty.js';
+import { calculateVisitStreak, clubDayKey, dailyIndex, nextClubDayStart } from './loyalty.js';
 
 describe('loyalty rules', () => {
   it('creates a stable club day in the configured timezone', () => {
@@ -11,6 +11,12 @@ describe('loyalty rules', () => {
   it('selects the same content for the same day and salt', () => {
     expect(dailyIndex('2026-07-20', 12, 'tip')).toBe(dailyIndex('2026-07-20', 12, 'tip'));
     expect(dailyIndex('2026-07-20', 0, 'tip')).toBe(-1);
+  });
+
+  it('finds the next calendar day boundary in the club timezone', () => {
+    const instant = new Date('2026-07-24T20:50:00.000Z');
+    expect(nextClubDayStart(instant, 'Europe/Moscow').toISOString()).toBe('2026-07-24T21:00:00.000Z');
+    expect(nextClubDayStart(instant, 'UTC').toISOString()).toBe('2026-07-25T00:00:00.000Z');
   });
 
   it('counts current and best visit streaks with reset gaps', () => {

@@ -65,7 +65,8 @@ export function normalizePhoneNumber(value: string) {
   return `+${digits}`;
 }
 
-export function displayName(user: { firstName: string; lastName?: string | null; username?: string | null }) {
+export function displayName(user: { firstName: string; lastName?: string | null; username?: string | null; nickname?: string | null }) {
+  if (user.nickname) return user.nickname;
   if (user.username) return `@${user.username}`;
   return `${user.firstName} ${user.lastName ?? ''}`.trim();
 }

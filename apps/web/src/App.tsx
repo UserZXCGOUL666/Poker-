@@ -7,6 +7,7 @@ import { AdminPage } from './pages/AdminPage';
 import { GamesPage } from './pages/GamesPage';
 import { HomePage } from './pages/HomePage';
 import { ProfilePage } from './pages/ProfilePage';
+import { PrivilegesPage } from './pages/PrivilegesPage';
 import { RatingPage } from './pages/RatingPage';
 import { BrowserLoginPage } from './pages/BrowserLoginPage';
 import { api } from './lib/api';
@@ -26,6 +27,7 @@ export default function App() {
         <Route index element={<HomePage />} />
         <Route path="games" element={<GamesPage />} />
         <Route path="rating" element={<RatingPage />} />
+        <Route path="privileges" element={<PrivilegesPage />} />
         <Route path="profile" element={<ProfilePage />} />
         <Route path="admin" element={user.role === 'ADMIN' ? <AdminPage /> : <Navigate to="/" replace />} />
       </Route>

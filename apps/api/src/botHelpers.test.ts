@@ -48,6 +48,7 @@ describe('bot helpers', () => {
   });
 
   it('uses username when available', () => {
+    expect(displayName({ firstName: 'Анна', username: 'anna', nickname: 'River Queen' })).toBe('River Queen');
     expect(displayName({ firstName: 'Анна', username: 'anna' })).toBe('@anna');
     expect(displayName({ firstName: 'Анна', lastName: 'Иванова' })).toBe('Анна Иванова');
   });

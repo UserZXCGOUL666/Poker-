@@ -51,7 +51,6 @@ authRouter.post('/telegram', async (req, res, next) => {
         firstName: telegramUser.first_name,
         lastName: telegramUser.last_name,
         username: telegramUser.username,
-        photoUrl: telegramUser.photo_url,
         role
       },
       create: {
@@ -59,7 +58,6 @@ authRouter.post('/telegram', async (req, res, next) => {
         firstName: telegramUser.first_name,
         lastName: telegramUser.last_name,
         username: telegramUser.username,
-        photoUrl: telegramUser.photo_url,
         role
       }
     });
@@ -175,6 +173,17 @@ authRouter.get('/me', requireAuth, async (req, res) => {
   return res.json(serializeUser(user));
 });
 
-function serializeUser(user: { id: string; telegramId: bigint; username: string | null; firstName: string; lastName: string | null; photoUrl: string | null; role: UserRole; points: number; clubXp: number }) {
-  return { ...user, telegramId: user.telegramId.toString() };
+function serializeUser(user: { id: string; telegramId: bigint; username: string | null; nickname: string | null; firstName: string; lastName: string | null; photoUrl: string | null; role: UserRole; points: number; clubXp: number }) {
+  return {
+    id: user.id,
+    telegramId: user.telegramId.toString(),
+    username: user.username,
+    nickname: user.nickname,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    photoUrl: user.photoUrl,
+    role: user.role,
+    points: user.points,
+    clubXp: user.clubXp
+  };
 }

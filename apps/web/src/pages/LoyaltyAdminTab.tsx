@@ -15,7 +15,7 @@ type HandOption = { id?: string; label: string; explanation: string; isCorrect: 
 type Hand = { id: string; title: string; scenario: string; heroCards: string[]; boardCards: string[]; difficulty: string; sortOrder: number; isActive: boolean; options: HandOption[]; _count: { attempts: number } };
 type Achievement = { id: string; title: string; description: string; rule: string; threshold: number; xpReward: number; isActive: boolean; _count: { users: number } };
 type Referral = { id: string; status: 'PENDING' | 'REWARDED' | 'REJECTED'; inviterXp: number; inviteeXp: number; createdAt: string; referrer: Person; invitedUser: Person };
-type Person = { id: string; firstName: string; lastName: string | null; username: string | null; clubXp?: number };
+type Person = { id: string; firstName: string; lastName: string | null; username: string | null; nickname?: string | null; clubXp?: number };
 type XpTransaction = { id: string; amount: number; balanceAfter: number; reason: string; source: string; createdAt: string; user: Person; createdBy: Person | null };
 type LoyaltyData = {
   settings: LoyaltySettings;
@@ -202,4 +202,4 @@ function EditorModal({ title, onClose, children }: { title: string; onClose: () 
   return <div className="modal-backdrop" onMouseDown={onClose}><div className="modal" onMouseDown={(event) => event.stopPropagation()}><div className="modal-head"><h2>{title}</h2><button onClick={onClose}><X /></button></div>{children}</div></div>;
 }
 
-function personName(person: Person) { return person.username ? `@${person.username}` : `${person.firstName} ${person.lastName ?? ''}`.trim(); }
+function personName(person: Person) { return person.nickname || (person.username ? `@${person.username}` : `${person.firstName} ${person.lastName ?? ''}`.trim()); }

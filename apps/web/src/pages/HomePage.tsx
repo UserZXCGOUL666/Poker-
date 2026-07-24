@@ -56,7 +56,7 @@ export function HomePage() {
         <div className="leader-row" key={leader.id}>
           <span className="place">{String(index + 1).padStart(2, '0')}</span>
           <Avatar firstName={leader.firstName} lastName={leader.lastName} photoUrl={leader.photoUrl} size="sm" />
-          <strong>{leader.username || `${leader.firstName} ${leader.lastName ?? ''}`}</strong>
+          <strong>{leader.nickname || leader.username || `${leader.firstName} ${leader.lastName ?? ''}`}</strong>
           <b>{points(leader.points)}</b>
         </div>
       ))}

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { TournamentRegistrationStatus } from '@prisma/client';
+import { Prisma, TournamentRegistrationStatus } from '@prisma/client';
 import { prisma } from '../db.js';
 import { requireAuth } from '../middleware/auth.js';
 import { cancelTournamentRegistration, registerForTournament } from '../services/registrations.js';
@@ -8,6 +8,8 @@ import { getBotUsername } from '../bot.js';
 import { z } from 'zod';
 import { answerDailyHand, ensureReferralCode, evaluateAchievements, getDailyContent, getPlayerLoyaltyStats } from '../services/loyalty.js';
 import { env } from '../config.js';
+import { AppError } from '../errors.js';
+import { writeAudit } from '../services/audit.js';
 
 export const publicRouter = Router();
 
@@ -28,9 +30,20 @@ publicRouter.get('/branding/theme', async (_req, res) => {
   return res.json({ accentColor: settings?.accentColor ?? '#3B8CFF', updatedAt: settings?.updatedAt ?? null });
 });
 
+publicRouter.get('/users/:id/avatar', async (req, res) => {
+  const user = await prisma.user.findUnique({ where: { id: req.params.id }, select: { profilePhotoData: true } });
+  const match = user?.profilePhotoData?.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) return res.status(404).end();
+  const image = Buffer.from(match[2], 'base64');
+  res.setHeader('Content-Type', match[1]);
+  res.setHeader('Content-Length', image.length);
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  return res.send(image);
+});
+
 publicRouter.use(requireAuth);
 
-const userSelect = { id: true, firstName: true, lastName: true, username: true, photoUrl: true, points: true } as const;
+const userSelect = { id: true, firstName: true, lastName: true, username: true, nickname: true, photoUrl: true, points: true } as const;
 
 publicRouter.get('/home', async (req, res) => {
   const user = await prisma.user.findUnique({ where: { id: req.auth!.userId }, select: userSelect });
@@ -132,7 +145,12 @@ publicRouter.get('/leaderboard', async (req, res) => {
 });
 
 publicRouter.get('/loyalty/daily', async (req, res, next) => {
-  try { return res.json(await getDailyContent(req.auth!.userId)); }
+  try {
+    const excludeTipId = typeof req.query.excludeTipId === 'string' && req.query.excludeTipId.length <= 100
+      ? req.query.excludeTipId
+      : undefined;
+    return res.json(await getDailyContent(req.auth!.userId, new Date(), { excludeTipId }));
+  }
   catch (error) { return next(error); }
 });
 
@@ -152,7 +170,7 @@ publicRouter.get('/loyalty/referral', async (req, res, next) => {
       prisma.referral.findMany({
         where: { referrerId: req.auth!.userId },
         orderBy: { createdAt: 'desc' },
-        include: { invitedUser: { select: { id: true, firstName: true, lastName: true, username: true, photoUrl: true } } }
+        include: { invitedUser: { select: { id: true, firstName: true, lastName: true, username: true, nickname: true, photoUrl: true } } }
       }),
       prisma.loyaltySettings.upsert({ where: { id: 'main' }, update: {}, create: { id: 'main' } })
     ]);
@@ -201,7 +219,7 @@ publicRouter.get('/profile', async (req, res) => {
       },
       referralsSent: {
         orderBy: { createdAt: 'desc' },
-        include: { invitedUser: { select: { id: true, firstName: true, lastName: true, username: true, photoUrl: true } } }
+        include: { invitedUser: { select: { id: true, firstName: true, lastName: true, username: true, nickname: true, photoUrl: true } } }
       }
     }
   });
@@ -229,4 +247,77 @@ publicRouter.get('/profile', async (req, res) => {
       bestStreak: loyaltyStats.streak.best
     }
   });
+});
+
+const profileUpdateSchema = z.object({
+  nickname: z.string()
+    .trim()
+    .min(2, 'Никнейм должен содержать минимум 2 символа')
+    .max(24, 'Никнейм не может быть длиннее 24 символов')
+    .regex(/^[\p{L}\p{N}._ -]+$/u, 'Используйте буквы, цифры, пробел, точку, дефис или подчёркивание')
+    .nullable()
+    .optional(),
+  photoData: z.string().max(500_000).nullable().optional()
+}).refine((value) => value.nickname !== undefined || value.photoData !== undefined, {
+  message: 'Нет изменений для сохранения'
+});
+
+function validateProfilePhoto(value: string) {
+  const match = value.match(/^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=]+)$/);
+  if (!match) throw new AppError('Поддерживаются JPG, PNG и WebP', 400, 'INVALID_PROFILE_PHOTO');
+  const image = Buffer.from(match[2], 'base64');
+  if (image.length > 360_000) throw new AppError('После обработки фотография должна быть не больше 350 КБ', 400, 'PROFILE_PHOTO_TOO_LARGE');
+  const isJpeg = image[0] === 0xff && image[1] === 0xd8 && image[2] === 0xff;
+  const isPng = image.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  const isWebp = image.subarray(0, 4).toString() === 'RIFF' && image.subarray(8, 12).toString() === 'WEBP';
+  if (!isJpeg && !isPng && !isWebp) throw new AppError('Фотография повреждена или имеет неверный формат', 400, 'INVALID_PROFILE_PHOTO');
+  return value;
+}
+
+publicRouter.patch('/profile', async (req, res, next) => {
+  try {
+    const input = profileUpdateSchema.parse(req.body);
+    const nickname = input.nickname === '' ? null : input.nickname;
+    if (nickname) {
+      const duplicate = await prisma.user.findFirst({
+        where: { id: { not: req.auth!.userId }, nickname: { equals: nickname, mode: 'insensitive' } },
+        select: { id: true }
+      });
+      if (duplicate) throw new AppError('Этот никнейм уже занят', 409, 'NICKNAME_TAKEN');
+    }
+    const before = await prisma.user.findUnique({
+      where: { id: req.auth!.userId },
+      select: { id: true, nickname: true, profilePhotoData: true }
+    });
+    if (!before) throw new AppError('Пользователь не найден', 404, 'USER_NOT_FOUND');
+    const data: Prisma.UserUpdateInput = {};
+    if (input.nickname !== undefined) data.nickname = nickname;
+    if (input.photoData !== undefined) {
+      data.profilePhotoData = input.photoData === null ? null : validateProfilePhoto(input.photoData);
+      data.photoUrl = input.photoData === null ? null : `/users/${before.id}/avatar?v=${Date.now()}`;
+    }
+    const updated = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.update({
+        where: { id: req.auth!.userId },
+        data,
+        select: { id: true, telegramId: true, username: true, nickname: true, firstName: true, lastName: true, photoUrl: true, role: true, points: true, clubXp: true }
+      });
+      await writeAudit(tx, {
+        actorId: user.id,
+        action: 'PROFILE_UPDATED',
+        entityType: 'User',
+        entityId: user.id,
+        summary: 'Игрок обновил профиль',
+        before: { nickname: before.nickname, hasCustomPhoto: Boolean(before.profilePhotoData) },
+        after: { nickname: user.nickname, hasCustomPhoto: Boolean(user.photoUrl) }
+      });
+      return user;
+    });
+    return res.json({ ...updated, telegramId: updated.telegramId.toString() });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return next(new AppError('Этот никнейм уже занят', 409, 'NICKNAME_TAKEN'));
+    }
+    return next(error);
+  }
 });

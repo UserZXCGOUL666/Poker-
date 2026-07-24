@@ -15,6 +15,19 @@ export function clubDayKey(date = new Date(), timeZone = env.CLUB_TIMEZONE) {
   return `${value.year}-${value.month}-${value.day}`;
 }
 
+export function nextClubDayStart(date = new Date(), timeZone = env.CLUB_TIMEZONE) {
+  const currentDay = clubDayKey(date, timeZone);
+  let low = date.getTime();
+  let high = low + 30 * 60 * 60 * 1000;
+  while (clubDayKey(new Date(high), timeZone) === currentDay) high += 12 * 60 * 60 * 1000;
+  while (high - low > 1) {
+    const middle = Math.floor((low + high) / 2);
+    if (clubDayKey(new Date(middle), timeZone) === currentDay) low = middle;
+    else high = middle;
+  }
+  return new Date(high);
+}
+
 export function dailyIndex(dayKey: string, count: number, salt = '') {
   if (count <= 0) return -1;
   const digest = crypto.createHash('sha256').update(`${salt}:${dayKey}`).digest();
@@ -229,7 +242,7 @@ export async function evaluateAchievements(userId: string) {
   });
 }
 
-export async function getDailyContent(userId: string, date = new Date()) {
+export async function getDailyContent(userId: string, date = new Date(), options: { excludeTipId?: string } = {}) {
   const dayKey = clubDayKey(date);
   const settings = await prisma.loyaltySettings.upsert({ where: { id: 'main' }, update: {}, create: { id: 'main' } });
   const [tips, hands, attempt, user] = await Promise.all([
@@ -238,13 +251,18 @@ export async function getDailyContent(userId: string, date = new Date()) {
     prisma.dailyHandAttempt.findUnique({ where: { userId_dayKey: { userId, dayKey } }, include: { selectedOption: true } }),
     prisma.user.findUnique({ where: { id: userId }, select: { clubXp: true } })
   ]);
-  const tip = tips[dailyIndex(dayKey, tips.length, 'tip')] ?? null;
+  const availableTips = options.excludeTipId && tips.length > 1
+    ? tips.filter((tip) => tip.id !== options.excludeTipId)
+    : tips;
+  const tip = availableTips.length ? availableTips[crypto.randomInt(availableTips.length)] : null;
   const selectedHand = attempt
     ? hands.find((hand) => hand.id === attempt.handId) ?? await prisma.pokerHand.findUnique({ where: { id: attempt.handId }, include: { options: { orderBy: [{ sortOrder: 'asc' }, { id: 'asc' }] } } })
     : hands[dailyIndex(dayKey, hands.length, 'hand')] ?? null;
   const correctOption = attempt && selectedHand ? selectedHand.options.find((option) => option.isCorrect) ?? null : null;
   return {
     dayKey,
+    nextDayAt: nextClubDayStart(date).toISOString(),
+    timeZone: env.CLUB_TIMEZONE,
     clubXp: user?.clubXp ?? 0,
     tip: tip ? { id: tip.id, title: tip.title, body: tip.body, category: tip.category } : null,
     hand: selectedHand ? {

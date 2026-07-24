@@ -1,12 +1,13 @@
 import {
-  Award, CalendarCheck, CheckCircle2, ChevronRight, Coins, Copy, Crown, Flame, Gift, History,
-  Medal, Phone, Send, ShieldCheck, Spade, Trophy, UserPlus, Users, Zap
+  Award, CalendarCheck, Camera, CheckCircle2, ChevronRight, Coins, Copy, Crown, Edit3, Flame, Gift, History,
+  Medal, Phone, Save, Send, ShieldCheck, Spade, Trash2, Trophy, UserPlus, Users, X, Zap
 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Avatar } from '../components/Avatar';
 import { ErrorState, Loading } from '../components/Loading';
-import { api } from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
+import { api, post } from '../lib/api';
 import { points, tournamentDate } from '../lib/format';
 import type { ClubXpTransaction, PointTransaction, ReferralInfo, Tournament, User } from '../types';
 
@@ -32,7 +33,50 @@ const xpSourceLabel: Record<ClubXpTransaction['source'], string> = {
   ACHIEVEMENT: 'Достижение', ADMIN_ADJUSTMENT: 'Администратор', REVERSAL: 'Отмена операции'
 };
 
+function readFile(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error('Не удалось прочитать фотографию'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function decodeImage(source: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Изображение повреждено или не поддерживается'));
+    image.src = source;
+  });
+}
+
+async function prepareProfilePhoto(file: File) {
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('Поддерживаются JPG, PNG и WebP');
+  if (file.size > 8 * 1024 * 1024) throw new Error('Исходный файл должен быть не больше 8 МБ');
+  const image = await decodeImage(await readFile(file));
+  const side = Math.min(image.naturalWidth, image.naturalHeight);
+  const sourceX = Math.floor((image.naturalWidth - side) / 2);
+  const sourceY = Math.floor((image.naturalHeight - side) / 2);
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 512;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Браузер не смог обработать фотографию');
+  context.drawImage(image, sourceX, sourceY, side, side, 0, 0, 512, 512);
+  let quality = 0.86;
+  let result = canvas.toDataURL('image/webp', quality);
+  if (!result.startsWith('data:image/webp')) result = canvas.toDataURL('image/jpeg', quality);
+  while (result.length > 430_000 && quality > 0.52) {
+    quality -= 0.08;
+    result = canvas.toDataURL(result.startsWith('data:image/webp') ? 'image/webp' : 'image/jpeg', quality);
+  }
+  if (result.length > 470_000) throw new Error('Не удалось достаточно уменьшить фотографию. Выберите другое изображение.');
+  return result;
+}
+
 export function ProfilePage() {
+  const { refresh } = useAuth();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [tab, setTab] = useState<ProfileTab>('overview');
   const [referral, setReferral] = useState<ReferralInfo | null>(null);
@@ -40,6 +84,13 @@ export function ProfilePage() {
   const [phoneMessage, setPhoneMessage] = useState<string | null>(null);
   const [phoneFallbackUrl, setPhoneFallbackUrl] = useState<string | null>(null);
   const [shareMessage, setShareMessage] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [nickname, setNickname] = useState('');
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [photoChanged, setPhotoChanged] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMessage, setProfileMessage] = useState<string | null>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
   useEffect(() => { api<Profile>('/profile').then((value) => setProfile(normalizeProfile(value))).catch((e: Error) => setError(e.message)); }, []);
   useEffect(() => {
     if (tab === 'friends' && !referral) api<ReferralInfo>('/loyalty/referral').then(setReferral).catch((e: Error) => setShareMessage(e.message));
@@ -98,12 +149,69 @@ export function ProfilePage() {
     }
   }
 
+  function openEditor() {
+    setNickname(profile?.nickname ?? profile?.username ?? '');
+    setPhotoPreview(profile?.photoUrl ?? null);
+    setPhotoChanged(false);
+    setProfileMessage(null);
+    setEditing(true);
+  }
+
+  async function choosePhoto(file: File | undefined) {
+    if (!file) return;
+    setProfileMessage(null);
+    try {
+      setPhotoPreview(await prepareProfilePhoto(file));
+      setPhotoChanged(true);
+    } catch (cause) {
+      setProfileMessage(cause instanceof Error ? cause.message : 'Не удалось обработать фотографию');
+    }
+  }
+
+  async function saveProfile() {
+    if (!profile) return;
+    setProfileSaving(true);
+    setProfileMessage(null);
+    try {
+      const body: { nickname: string | null; photoData?: string | null } = { nickname: nickname.trim() || null };
+      if (photoChanged) body.photoData = photoPreview;
+      const updated = await post<User>('/profile', body, 'PATCH');
+      setProfile({ ...profile, ...updated });
+      await refresh();
+      setEditing(false);
+      setProfileMessage('Профиль обновлён');
+    } catch (cause) {
+      setProfileMessage(cause instanceof Error ? cause.message : 'Не удалось обновить профиль');
+    } finally {
+      setProfileSaving(false);
+    }
+  }
+
   return <div className="page profile-page">
     <section className="profile-hero">
       <Avatar firstName={profile.firstName} lastName={profile.lastName} photoUrl={profile.photoUrl} size="lg" />
-      <h1>{profile.firstName} {profile.lastName}</h1><p>@{profile.username || 'player'}</p>
+      <button className="profile-edit-button" onClick={openEditor}><Edit3 /> Изменить профиль</button>
+      <h1>{profile.nickname || profile.username || `${profile.firstName} ${profile.lastName ?? ''}`}</h1>
+      <p>{profile.nickname ? `${profile.firstName} ${profile.lastName ?? ''}` : profile.username ? `@${profile.username}` : 'Игрок Poker Club'}</p>
       {profile.role === 'ADMIN' && <span className="admin-pill"><ShieldCheck size={14} /> Администратор</span>}
     </section>
+    {profileMessage && !editing && <div className="profile-save-message">{profileMessage}</div>}
+    {editing && <div className="profile-editor-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setEditing(false); }}>
+      <section className="profile-editor" role="dialog" aria-modal="true" aria-label="Редактирование профиля">
+        <header><div><small>ПРОФИЛЬ</small><h2>Никнейм и фотография</h2></div><button onClick={() => setEditing(false)} aria-label="Закрыть"><X /></button></header>
+        <div className="profile-photo-editor">
+          <Avatar firstName={profile.firstName} lastName={profile.lastName} photoUrl={photoPreview} size="lg" />
+          <div>
+            <button className="button secondary" onClick={() => photoInput.current?.click()}><Camera />Выбрать фото</button>
+            {(photoPreview || profile.photoUrl) && <button className="profile-photo-remove" onClick={() => { setPhotoPreview(null); setPhotoChanged(true); }}><Trash2 />Вернуть заглушку</button>}
+            <input ref={photoInput} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => void choosePhoto(event.target.files?.[0])} />
+          </div>
+        </div>
+        <label className="profile-nickname-field">Никнейм<input value={nickname} onChange={(event) => setNickname(event.target.value)} minLength={2} maxLength={24} placeholder="Например, RiverFox" /><small>Будет отображаться в рейтинге и внутри клуба</small></label>
+        {profileMessage && <div className="form-error">{profileMessage}</div>}
+        <button className="button primary wide" disabled={profileSaving || (nickname.trim().length > 0 && nickname.trim().length < 2)} onClick={() => void saveProfile()}><Save />{profileSaving ? 'Сохраняем…' : 'Сохранить'}</button>
+      </section>
+    </div>}
     <div className="profile-stats">
       <div><Trophy size={20} /><strong>#{profile.rank}</strong><span>в рейтинге</span></div>
       <div><Spade size={20} /><strong>{points(profile.points)}</strong><span>Rating PTS</span></div>
@@ -151,7 +259,7 @@ export function ProfilePage() {
       <section className="referral-hero"><span><UserPlus /></span><h2>Приглашайте друзей</h2><p>Награда начислится только после первого подтверждённого посещения друга.</p>{referral ? <><div><small>ВАШ КОД</small><strong>{referral.referralCode}</strong><button onClick={() => void navigator.clipboard.writeText(referral.referralCode)} aria-label="Скопировать код"><Copy /></button></div><button className="referral-share" onClick={() => void shareReferral()}><Send />Поделиться приглашением</button><small>Вы получите +{referral.rewardXp} XP, друг — +{referral.inviteeRewardXp} XP</small></> : <span className="mini-loader">Готовим ссылку…</span>}</section>
       {shareMessage && <div className="phone-share-message">{shareMessage}</div>}
       <div className="section-title"><h2>Приглашённые</h2><span>{referral?.referrals.length ?? profile.referralsSent.length}</span></div>
-      <div className="referral-list card">{(referral?.referrals ?? profile.referralsSent).map((item) => <article key={item.id}><Avatar firstName={item.invitedUser.firstName} lastName={item.invitedUser.lastName} photoUrl={item.invitedUser.photoUrl} size="sm" /><div><strong>{item.invitedUser.username ? `@${item.invitedUser.username}` : `${item.invitedUser.firstName} ${item.invitedUser.lastName ?? ''}`}</strong><small>{item.status === 'REWARDED' ? `Посещение подтверждено · +${item.inviterXp} XP` : item.status === 'REJECTED' ? 'Приглашение отклонено' : 'Ожидаем первое посещение'}</small></div><span className={`referral-status ${item.status.toLowerCase()}`}>{item.status === 'REWARDED' ? <CheckCircle2 /> : item.status === 'PENDING' ? '…' : '×'}</span></article>)}{(referral?.referrals ?? profile.referralsSent).length === 0 && <div className="empty-inline">Приглашённых игроков пока нет</div>}</div>
+      <div className="referral-list card">{(referral?.referrals ?? profile.referralsSent).map((item) => <article key={item.id}><Avatar firstName={item.invitedUser.firstName} lastName={item.invitedUser.lastName} photoUrl={item.invitedUser.photoUrl} size="sm" /><div><strong>{item.invitedUser.nickname || (item.invitedUser.username ? `@${item.invitedUser.username}` : `${item.invitedUser.firstName} ${item.invitedUser.lastName ?? ''}`)}</strong><small>{item.status === 'REWARDED' ? `Посещение подтверждено · +${item.inviterXp} XP` : item.status === 'REJECTED' ? 'Приглашение отклонено' : 'Ожидаем первое посещение'}</small></div><span className={`referral-status ${item.status.toLowerCase()}`}>{item.status === 'REWARDED' ? <CheckCircle2 /> : item.status === 'PENDING' ? '…' : '×'}</span></article>)}{(referral?.referrals ?? profile.referralsSent).length === 0 && <div className="empty-inline">Приглашённых игроков пока нет</div>}</div>
     </>}
   </div>;
 }

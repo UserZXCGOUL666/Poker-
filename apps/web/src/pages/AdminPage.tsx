@@ -46,7 +46,7 @@ function replaceAdminLocation(section: AdminSection, kind?: AdminIntentKind, tar
   if (targetId) url.searchParams.set('target', targetId);
   window.history.replaceState({}, '', `${url.pathname}${url.search}`);
 }
-type AdminUser = Pick<User, 'id' | 'telegramId' | 'firstName' | 'lastName' | 'username' | 'role' | 'points'> & {
+type AdminUser = Pick<User, 'id' | 'telegramId' | 'firstName' | 'lastName' | 'username' | 'nickname' | 'role' | 'points'> & {
   phoneNumber: string | null;
   phoneSharedAt: string | null;
   tags: PlayerTag[];
@@ -58,7 +58,7 @@ type BrowserSession = {
   createdAt: string;
   expiresAt: string;
   revokedAt: string | null;
-  user?: Pick<AdminUser, 'id' | 'telegramId' | 'firstName' | 'lastName' | 'username'>;
+  user?: Pick<AdminUser, 'id' | 'telegramId' | 'firstName' | 'lastName' | 'username' | 'nickname'>;
 };
 type BrowserInviteResult = { url: string; expiresAt: string; user: AdminUser };
 type AdminUserDetails = AdminUser & {
@@ -69,7 +69,7 @@ type AdminUserDetails = AdminUser & {
   results: { id: string; place: number; createdAt: string; tournament: Pick<Tournament, 'id' | 'title' | 'startsAt' | 'status'> }[];
   browserSessions: BrowserSession[];
 };
-type AdminPointTransaction = PointTransaction & { user: Pick<User, 'id' | 'firstName' | 'lastName' | 'username'> };
+type AdminPointTransaction = PointTransaction & { user: Pick<User, 'id' | 'firstName' | 'lastName' | 'username' | 'nickname'> };
 type Overview = {
   players: number;
   tournaments: number;
@@ -90,11 +90,11 @@ type AuditResponse = { logs: AuditLog[]; filters: { actions: string[]; entityTyp
 type TournamentDetails = Tournament & {
   description: string | null;
   season: Season;
-  results: { userId: string; place: number; points: number; user: Pick<AdminUser, 'id' | 'firstName' | 'lastName' | 'username'> }[];
+  results: { userId: string; place: number; points: number; user: Pick<AdminUser, 'id' | 'firstName' | 'lastName' | 'username' | 'nickname'> }[];
   registrations: Registration[];
   pointBatches: PointBatch[];
 };
-type SeatingPlayer = Pick<User, 'id' | 'firstName' | 'lastName' | 'username' | 'photoUrl'>;
+type SeatingPlayer = Pick<User, 'id' | 'firstName' | 'lastName' | 'username' | 'nickname' | 'photoUrl'>;
 type SeatingData = {
   tournament: Pick<Tournament, 'id' | 'title' | 'startsAt' | 'status'> & { seatingPublishedAt: string | null; seatingVersion: number };
   tables: { id: string; number: number; capacity: number; seats: { id: string; userId: string; seatNumber: number; user: SeatingPlayer }[] }[];
@@ -201,10 +201,10 @@ export function AdminPage() {
       <div className="admin-brand"><span><Spade size={21} fill="currentColor" /></span><div><strong>POKER CLUB</strong><small>Панель управления</small></div></div>
       <small className="admin-nav-label">РАБОЧЕЕ ПРОСТРАНСТВО</small>
       <nav>{desktopSections.map(({ id, label, icon: Icon }) => <button key={id} className={section === id ? 'active' : ''} onClick={() => navigate(id)}><Icon size={19} />{label}</button>)}</nav>
-      <div className="admin-user"><Avatar firstName={user!.firstName} lastName={user!.lastName} size="sm" /><div><strong>{user!.firstName}</strong><small>Администратор</small></div><Link to="/" aria-label="Вернуться в приложение"><LogOut size={18} /></Link></div>
+      <div className="admin-user"><Link to="/profile" aria-label="Открыть профиль"><Avatar firstName={user!.firstName} lastName={user!.lastName} photoUrl={user!.photoUrl} size="sm" /></Link><div><strong>{user!.nickname || user!.firstName}</strong><small>Администратор</small></div><Link to="/" aria-label="Вернуться в приложение"><LogOut size={18} /></Link></div>
     </aside>
     <main className="admin-main">
-      <header className="admin-mobile-head"><Link to="/"><ArrowLeft /></Link><strong>{sectionTitles[section]}</strong><ShieldCheck /></header>
+      <header className="admin-mobile-head"><Link to="/"><ArrowLeft /></Link><strong>{sectionTitles[section]}</strong><Link to="/profile" aria-label="Открыть профиль"><Avatar firstName={user!.firstName} lastName={user!.lastName} photoUrl={user!.photoUrl} size="sm" /></Link></header>
       {notice && <div className="toast"><CheckCircle2 size={18} />{notice}</div>}
       {section === 'overview' && <OverviewTab data={overview} onNavigate={navigate} onDone={done} />}
       {!sectionReady && <div className="admin-view"><Loading label="Загружаем раздел…" /></div>}
@@ -260,7 +260,7 @@ function OverviewTab({ data, onNavigate, onDone }: { data: Overview; onNavigate:
       </section>
       <section className="admin-section">
         <div className="admin-section-title"><div><h2>Последние операции</h2><p>Журнал ручного изменения баланса</p></div><button className="button ghost" onClick={() => onNavigate('players')}>Игроки <ChevronRight size={15} /></button></div>
-        <div className="overview-points-list">{data.recentPointTransactions.map((entry) => <article key={entry.id}><span className={entry.amount > 0 ? 'award' : 'deduct'}>{entry.amount > 0 ? '+' : ''}{points(entry.amount)}</span><div><strong>{entry.user.username ? `@${entry.user.username}` : `${entry.user.firstName} ${entry.user.lastName ?? ''}`}</strong><small>{entry.reason} · {tournamentDate(entry.createdAt).full}</small></div><b>{points(entry.balanceAfter)}</b></article>)}{!data.recentPointTransactions.length && <Empty icon={<Coins />} title="Операций пока нет" text="Начисления появятся здесь" />}</div>
+        <div className="overview-points-list">{data.recentPointTransactions.map((entry) => <article key={entry.id}><span className={entry.amount > 0 ? 'award' : 'deduct'}>{entry.amount > 0 ? '+' : ''}{points(entry.amount)}</span><div><strong>{playerLabel(entry.user)}</strong><small>{entry.reason} · {tournamentDate(entry.createdAt).full}</small></div><b>{points(entry.balanceAfter)}</b></article>)}{!data.recentPointTransactions.length && <Empty icon={<Coins />} title="Операций пока нет" text="Начисления появятся здесь" />}</div>
       </section>
     </div>
   </div>;
@@ -422,7 +422,7 @@ function PlayersTab({ users, tags, reasonPresets, intent, onDone }: { users: Adm
   }, [intent?.nonce, intent?.kind]);
 
   const filtered = users.filter((item) => {
-    const matchesSearch = `${item.firstName} ${item.lastName ?? ''} ${item.username ?? ''} ${item.telegramId} ${item.phoneNumber ?? ''}`.toLowerCase().includes(query.toLowerCase());
+    const matchesSearch = `${item.firstName} ${item.lastName ?? ''} ${item.username ?? ''} ${item.nickname ?? ''} ${item.telegramId} ${item.phoneNumber ?? ''}`.toLowerCase().includes(query.toLowerCase());
     const matchesTag = !tagFilter || item.tags.some((tag) => tag.id === tagFilter);
     const lastPlayed = item.lastPlayedAt ? new Date(item.lastPlayedAt).getTime() : 0;
     const matchesActivity = activityFilter === 'all' || (activityFilter === 'never' ? !lastPlayed : lastPlayed >= Date.now() - 30 * 86_400_000);
@@ -506,12 +506,12 @@ function PlayersTab({ users, tags, reasonPresets, intent, onDone }: { users: Adm
           <button onClick={() => { setTagFilter(''); setActivityFilter('all'); setAccessFilter('all'); setMinPoints(''); }}><RotateCcw size={13} />Сбросить</button>
         </div>}
         <div className="players-count">Найдено: {filtered.length}</div>
-        <div className="players-list">{filtered.map((item, index) => <button key={item.id} className={selectedId === item.id ? 'active' : ''} onClick={() => setSelectedId(item.id)}><span className="player-rank">#{users.indexOf(item) + 1 || index + 1}</span><Avatar firstName={item.firstName} lastName={item.lastName} size="sm" /><div><strong>{item.username ? `@${item.username}` : `${item.firstName} ${item.lastName ?? ''}`}</strong><small>{item.phoneNumber ? `☎ ${item.phoneNumber}` : `ID ${item.telegramId}`} · {item._count?.results ?? 0} игр</small><span className="mini-tags">{item.tags.slice(0, 2).map((tag) => <i key={tag.id} style={{ '--tag-color': tag.color } as CSSProperties}>{tag.name}</i>)}</span></div><b>{points(item.points)}<small> PTS</small></b></button>)}{!filtered.length && <Empty icon={<Search />} title="Игроки не найдены" text="Попробуйте другой запрос или сбросьте фильтры" />}</div>
+        <div className="players-list">{filtered.map((item, index) => <button key={item.id} className={selectedId === item.id ? 'active' : ''} onClick={() => setSelectedId(item.id)}><span className="player-rank">#{users.indexOf(item) + 1 || index + 1}</span><Avatar firstName={item.firstName} lastName={item.lastName} size="sm" /><div><strong>{playerLabel(item)}</strong><small>{item.phoneNumber ? `☎ ${item.phoneNumber}` : `ID ${item.telegramId}`} · {item._count?.results ?? 0} игр</small><span className="mini-tags">{item.tags.slice(0, 2).map((tag) => <i key={tag.id} style={{ '--tag-color': tag.color } as CSSProperties}>{tag.name}</i>)}</span></div><b>{points(item.points)}<small> PTS</small></b></button>)}{!filtered.length && <Empty icon={<Search />} title="Игроки не найдены" text="Попробуйте другой запрос или сбросьте фильтры" />}</div>
       </aside>
       <section className="player-detail">
         {formError && !detail && !loading && <div className="form-error">{formError}</div>}
         {loading && !detail ? <Loading label="Открываем карточку…" /> : detail ? <>
-          <header className="player-detail-head"><Avatar firstName={detail.firstName} lastName={detail.lastName} photoUrl={detail.photoUrl} size="lg" /><div><span>{detail.role === 'ADMIN' ? 'АДМИНИСТРАТОР' : 'ИГРОК'}</span><h2>{detail.firstName} {detail.lastName ?? ''}</h2><p>@{detail.username || 'player'} · Telegram ID {detail.telegramId}{detail.phoneNumber ? ` · ${detail.phoneNumber}` : ' · телефон не передан'}</p></div><strong>{points(detail.points)}<small> PTS</small></strong></header>
+          <header className="player-detail-head"><Avatar firstName={detail.firstName} lastName={detail.lastName} photoUrl={detail.photoUrl} size="lg" /><div><span>{detail.role === 'ADMIN' ? 'АДМИНИСТРАТОР' : 'ИГРОК'}</span><h2>{playerLabel(detail)}</h2><p>{detail.firstName} {detail.lastName ?? ''} · Telegram ID {detail.telegramId}{detail.phoneNumber ? ` · ${detail.phoneNumber}` : ' · телефон не передан'}</p></div><strong>{points(detail.points)}<small> PTS</small></strong></header>
           <div className="player-detail-tabs"><button className={detailTab === 'balance' ? 'active' : ''} onClick={() => setDetailTab('balance')}><Coins />Баланс</button><button className={detailTab === 'history' ? 'active' : ''} onClick={() => setDetailTab('history')}><Medal />История</button><button className={detailTab === 'notes' ? 'active' : ''} onClick={() => setDetailTab('notes')}><NotebookPen />Заметки</button><button className={detailTab === 'access' ? 'active' : ''} onClick={() => setDetailTab('access')}><KeyRound />Доступ</button></div>
           {detailTab === 'balance' && <form className="player-points-editor" onSubmit={changePoints}>
             <div className="point-mode"><button type="button" className={mode === 'award' ? 'active award' : ''} onClick={() => setMode('award')}>+ Начислить</button><button type="button" className={mode === 'deduct' ? 'active deduct' : ''} onClick={() => setMode('deduct')}>− Списать</button></div>
@@ -673,7 +673,7 @@ function ParticipantsEditor({ details, users, selectedId, setSelectedId, saving,
   const available = users.filter((user) => !details.registrations.some((item) => item.user.id === user.id && item.status !== 'CANCELLED'));
   return <div className="participants-editor">
     <div className="registration-summary"><article><UserCheck /><strong>{occupied.length}</strong><span>в основном списке</span></article><article><ListChecks /><strong>{waitlist.length}</strong><span>в листе ожидания</span></article><article><Users /><strong>{Math.max(0, details.capacity - occupied.length)}</strong><span>свободных мест</span></article></div>
-    <div className="add-player"><select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}><option value="">Добавить игрока</option>{available.map((user) => <option value={user.id} key={user.id}>{user.username ? `@${user.username}` : `${user.firstName} ${user.lastName ?? ''}`}</option>)}</select><button className="button secondary" disabled={!selectedId || saving} onClick={() => void onAdd()}><Plus size={17} />Добавить</button></div>
+    <div className="add-player"><select value={selectedId} onChange={(event) => setSelectedId(event.target.value)}><option value="">Добавить игрока</option>{available.map((user) => <option value={user.id} key={user.id}>{playerLabel(user)}</option>)}</select><button className="button secondary" disabled={!selectedId || saving} onClick={() => void onAdd()}><Plus size={17} />Добавить</button></div>
     {error && <div className="form-error">{error}</div>}
     <div className="registration-groups">
       <RegistrationGroup title="Основной список" items={occupied} saving={saving} onStatus={onStatus} />
@@ -686,7 +686,7 @@ function ParticipantsEditor({ details, users, selectedId, setSelectedId, saving,
 function RegistrationGroup({ title, items, saving, onStatus, ordered = false, muted = false }: { title: string; items: Registration[]; saving: boolean; onStatus: (id: string, status: TournamentRegistrationStatus) => Promise<void>; ordered?: boolean; muted?: boolean }) {
   return <section className={muted ? 'muted' : ''}><h3>{title}<span>{items.length}</span></h3><div>{items.map((registration, index) => {
     const locked = registration.status === 'CHECKED_IN' || registration.status === 'PLAYED';
-    return <article key={registration.id}><span className="registration-order">{ordered ? index + 1 : <UserCheck size={15} />}</span><Avatar firstName={registration.user.firstName} lastName={registration.user.lastName} size="sm" /><div><strong>{registration.user.username ? `@${registration.user.username}` : `${registration.user.firstName} ${registration.user.lastName ?? ''}`}</strong><small>{registrationStatusLabel(registration.status)} · {tournamentDate(registration.createdAt).full}{locked ? ' · необратимо' : ''}</small></div><select disabled={saving || registration.status === 'PLAYED'} value={registration.status} onChange={(event) => void onStatus(registration.id, event.target.value as TournamentRegistrationStatus)}>{registration.status === 'CHECKED_IN' ? <><option value="CHECKED_IN">Присутствие подтверждено</option><option value="PLAYED">Сыграл</option></> : registration.status === 'PLAYED' ? <option value="PLAYED">Сыграл</option> : <><option value="REGISTERED">В основном списке</option><option value="WAITLISTED">Лист ожидания</option><option value="CHECKED_IN">Пришёл</option><option value="CANCELLED">Отменить</option></>}</select></article>})}{items.length === 0 && <p>Список пуст</p>}</div></section>;
+    return <article key={registration.id}><span className="registration-order">{ordered ? index + 1 : <UserCheck size={15} />}</span><Avatar firstName={registration.user.firstName} lastName={registration.user.lastName} size="sm" /><div><strong>{playerLabel(registration.user)}</strong><small>{registrationStatusLabel(registration.status)} · {tournamentDate(registration.createdAt).full}{locked ? ' · необратимо' : ''}</small></div><select disabled={saving || registration.status === 'PLAYED'} value={registration.status} onChange={(event) => void onStatus(registration.id, event.target.value as TournamentRegistrationStatus)}>{registration.status === 'CHECKED_IN' ? <><option value="CHECKED_IN">Присутствие подтверждено</option><option value="PLAYED">Сыграл</option></> : registration.status === 'PLAYED' ? <option value="PLAYED">Сыграл</option> : <><option value="REGISTERED">В основном списке</option><option value="WAITLISTED">Лист ожидания</option><option value="CHECKED_IN">Пришёл</option><option value="CANCELLED">Отменить</option></>}</select></article>})}{items.length === 0 && <p>Список пуст</p>}</div></section>;
 }
 
 function TemplatesManager({ templates, onClose, onDone, onUse }: { templates: TournamentTemplate[]; onClose: () => void; onDone: (message: string) => void; onUse: (template: TournamentTemplate) => void }) {
@@ -806,11 +806,11 @@ function ResultsEditor({ details, users, onSaved, onDone }: { details: Tournamen
   return <div className="integrated-results">
     <div className="results-note"><CircleAlert size={17} /><span>Сначала сохраните места. Затем проверьте очки и начислите их одной атомарной операцией — либо всем, либо никому.</span></div>
     {!placesSaved && <div className="results-fast-tools"><div><strong>Быстрое заполнение</strong><small>Черновик автоматически сохраняется в этом браузере</small></div><button className="button secondary" disabled={arrivals.length < 2 || saving} onClick={addArrivals}><UserCheck size={16} />Добавить пришедших ({arrivals.length})</button><button className={`button ghost ${eliminationMode ? 'active' : ''}`} disabled={entries.length < 2} onClick={() => setEliminationMode((value) => !value)}><UserMinus size={16} />Режим выбывания</button></div>}
-    <div className="add-player"><select value={playerId} onChange={(event) => setPlayerId(event.target.value)}><option value="">Выберите игрока</option>{available.map((user) => <option value={user.id} key={user.id}>{user.username ? `@${user.username}` : `${user.firstName} ${user.lastName ?? ''}`}</option>)}</select><button className="button secondary" disabled={!playerId} onClick={() => { const user = users.find((item) => item.id === playerId); if (user) setOrderedEntries([...entries, user]); setPlayerId(''); }}><Plus size={17} />Добавить</button></div>
+    <div className="add-player"><select value={playerId} onChange={(event) => setPlayerId(event.target.value)}><option value="">Выберите игрока</option>{available.map((user) => <option value={user.id} key={user.id}>{playerLabel(user)}</option>)}</select><button className="button secondary" disabled={!playerId} onClick={() => { const user = users.find((item) => item.id === playerId); if (user) setOrderedEntries([...entries, user]); setPlayerId(''); }}><Plus size={17} />Добавить</button></div>
     {eliminationMode && entries.length > 1 && !placesSaved && <div className="elimination-hint"><UserMinus size={16} /><span>Нажимайте «Выбыл» по ходу игры. Первый выбывший автоматически получит последнее место. Осталось в игре: <strong>{entries.length - eliminatedCount}</strong>.</span></div>}
     <div className="result-list">{entries.map((user, index) => {
       const eliminated = index >= entries.length - eliminatedCount;
-      return <div className={`result-row scoring ${eliminated ? 'eliminated' : ''}`} key={user.id}><span className={`result-place ${index < 3 ? 'podium' : ''}`}>{index + 1}</span><Avatar firstName={user.firstName} lastName={user.lastName} size="sm" /><div><strong>{user.username ? `@${user.username}` : `${user.firstName} ${user.lastName ?? ''}`}</strong><small>{eliminated ? 'Место определено выбыванием' : `Причина: «${details.title}: ${index + 1} место»`}</small></div><label><input aria-label={`Очки, ${user.firstName}`} type="number" min="1" max="100000" value={scores[user.id] ?? ''} onChange={(event) => setScores({ ...scores, [user.id]: event.target.value })} /><span>PTS</span></label>{eliminationMode && !placesSaved && !eliminated ? <button className="eliminate-button" disabled={entries.length - eliminatedCount <= 1} onClick={() => eliminate(index)}><UserMinus size={14} />Выбыл</button> : <div className="row-actions"><button onClick={() => move(index, -1)} disabled={index === 0 || placesSaved}><ArrowUp /></button><button onClick={() => move(index, 1)} disabled={index === entries.length - 1 || placesSaved}><ArrowDown /></button><button className="danger" disabled={placesSaved} onClick={() => setOrderedEntries(entries.filter((entry) => entry.id !== user.id))}><X /></button></div>}</div>;
+      return <div className={`result-row scoring ${eliminated ? 'eliminated' : ''}`} key={user.id}><span className={`result-place ${index < 3 ? 'podium' : ''}`}>{index + 1}</span><Avatar firstName={user.firstName} lastName={user.lastName} size="sm" /><div><strong>{playerLabel(user)}</strong><small>{eliminated ? 'Место определено выбыванием' : `Причина: «${details.title}: ${index + 1} место»`}</small></div><label><input aria-label={`Очки, ${user.firstName}`} type="number" min="1" max="100000" value={scores[user.id] ?? ''} onChange={(event) => setScores({ ...scores, [user.id]: event.target.value })} /><span>PTS</span></label>{eliminationMode && !placesSaved && !eliminated ? <button className="eliminate-button" disabled={entries.length - eliminatedCount <= 1} onClick={() => eliminate(index)}><UserMinus size={14} />Выбыл</button> : <div className="row-actions"><button onClick={() => move(index, -1)} disabled={index === 0 || placesSaved}><ArrowUp /></button><button onClick={() => move(index, 1)} disabled={index === entries.length - 1 || placesSaved}><ArrowDown /></button><button className="danger" disabled={placesSaved} onClick={() => setOrderedEntries(entries.filter((entry) => entry.id !== user.id))}><X /></button></div>}</div>;
     })}{!entries.length && <Empty icon={<Medal />} title="Добавьте участников" text="Загрузите прошедших чек-ин одним нажатием" />}</div>
     {error && <div className="form-error">{error}</div>}
     <div className="results-actions"><button className="button secondary" disabled={entries.length < 2 || saving || placesSaved} onClick={() => void save()}><Save size={17} />{placesSaved ? 'Места сохранены' : saving ? 'Сохраняем…' : 'Сохранить места'}</button><button className="button primary" disabled={!placesSaved || details.pointBatches.length > 0 || saving || entries.some((entry) => Number(scores[entry.id]) <= 0)} onClick={() => void awardAll()}><Coins size={17} />{details.pointBatches.length > 0 ? 'Очки уже начислены' : 'Начислить всем'}</button></div>
@@ -1196,7 +1196,7 @@ function tournamentPayload(form: FormData) {
 function dateTimeInput(value: string) { const date = new Date(value); return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16); }
 function dateInput(value: string) { return new Date(value).toISOString().slice(0, 10); }
 function dateOnlyLabel(value: string) { return new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(value)); }
-function playerLabel(user: Pick<User, 'firstName' | 'lastName' | 'username'>) { return user.username ? `@${user.username}` : `${user.firstName} ${user.lastName ?? ''}`.trim(); }
+function playerLabel(user: Pick<User, 'firstName' | 'lastName' | 'username'> & { nickname?: string | null }) { return user.nickname || (user.username ? `@${user.username}` : `${user.firstName} ${user.lastName ?? ''}`.trim()); }
 function defaultTournamentScore(index: number) { return [500, 350, 250, 150, 100][index] ?? 50; }
 async function prepareRatingBanner(file: File) {
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('Выберите PNG, JPEG или WebP');

@@ -8,6 +8,7 @@ export type User = {
   id: string;
   telegramId: string;
   username: string | null;
+  nickname: string | null;
   firstName: string;
   lastName: string | null;
   photoUrl: string | null;
@@ -16,7 +17,7 @@ export type User = {
   clubXp: number;
 };
 
-export type Player = Pick<User, 'id' | 'firstName' | 'lastName' | 'username' | 'photoUrl' | 'points'> & { rank?: number };
+export type Player = Pick<User, 'id' | 'firstName' | 'lastName' | 'username' | 'nickname' | 'photoUrl' | 'points'> & { rank?: number };
 
 export type Season = {
   id: string;
@@ -92,6 +93,8 @@ export type ClubXpTransaction = {
 
 export type DailyContent = {
   dayKey: string;
+  nextDayAt: string;
+  timeZone: string;
   clubXp: number;
   tip: { id: string; title: string; body: string; category: string } | null;
   hand: {
@@ -127,6 +130,6 @@ export type ReferralInfo = {
     inviteeXp: number;
     createdAt: string;
     rewardedAt: string | null;
-    invitedUser: Pick<User, 'id' | 'firstName' | 'lastName' | 'username' | 'photoUrl'>;
+    invitedUser: Pick<User, 'id' | 'firstName' | 'lastName' | 'username' | 'nickname' | 'photoUrl'>;
   }[];
 };

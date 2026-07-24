@@ -18,15 +18,15 @@ loyaltyAdminRouter.get('/', async (_req, res) => {
     prisma.clubXpTransaction.findMany({
       orderBy: { createdAt: 'desc' }, take: 30,
       include: {
-        user: { select: { id: true, firstName: true, lastName: true, username: true, clubXp: true } },
+        user: { select: { id: true, firstName: true, lastName: true, username: true, nickname: true, clubXp: true } },
         createdBy: { select: { id: true, firstName: true, lastName: true } }
       }
     }),
     prisma.referral.findMany({
       orderBy: { createdAt: 'desc' }, take: 50,
       include: {
-        referrer: { select: { id: true, firstName: true, lastName: true, username: true } },
-        invitedUser: { select: { id: true, firstName: true, lastName: true, username: true } }
+        referrer: { select: { id: true, firstName: true, lastName: true, username: true, nickname: true } },
+        invitedUser: { select: { id: true, firstName: true, lastName: true, username: true, nickname: true } }
       }
     }),
     prisma.user.count(),

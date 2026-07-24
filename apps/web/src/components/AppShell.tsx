@@ -1,4 +1,4 @@
-import { BarChart3, CalendarDays, Home, ShieldCheck, UserRound } from 'lucide-react';
+import { BarChart3, CalendarDays, Gift, Home, ShieldCheck, UserRound } from 'lucide-react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Avatar } from './Avatar';
@@ -7,6 +7,7 @@ const navItems = [
   { to: '/', label: 'Главная', icon: Home },
   { to: '/games', label: 'Игры', icon: CalendarDays },
   { to: '/rating', label: 'Рейтинг', icon: BarChart3 },
+  { to: '/privileges', label: 'Привилегии', icon: Gift },
   { to: '/profile', label: 'Профиль', icon: UserRound }
 ];
 
@@ -22,7 +23,7 @@ export function AppShell() {
         <div className="brand-mark">PL</div>
         <div className="brand-copy"><strong>POKER CLUB</strong><span>Спортивная лига</span></div>
         {user?.role === 'ADMIN' && <NavLink className="admin-shortcut" to="/admin" aria-label="Админка"><ShieldCheck size={19} /></NavLink>}
-        {user && <Avatar firstName={user.firstName} lastName={user.lastName} photoUrl={user.photoUrl} />}
+        {user && <NavLink className="header-profile-link" to="/profile" aria-label="Открыть профиль"><Avatar firstName={user.firstName} lastName={user.lastName} photoUrl={user.photoUrl} /></NavLink>}
       </header>
       <main className="app-content"><Outlet /></main>
       <nav className="bottom-nav">

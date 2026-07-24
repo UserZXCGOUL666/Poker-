@@ -82,12 +82,12 @@ export async function getTournamentSeating(tournamentId: string) {
       id: true, title: true, startsAt: true, status: true, seatingPublishedAt: true, seatingVersion: true,
       tables: {
         orderBy: { number: 'asc' },
-        include: { seats: { orderBy: { seatNumber: 'asc' }, include: { user: { select: { id: true, firstName: true, lastName: true, username: true, photoUrl: true } } } } }
+        include: { seats: { orderBy: { seatNumber: 'asc' }, include: { user: { select: { id: true, firstName: true, lastName: true, username: true, nickname: true, photoUrl: true } } } } }
       },
       registrations: {
         where: { status: { in: [...seatableStatuses] } },
         orderBy: [{ status: 'desc' }, { createdAt: 'asc' }],
-        include: { user: { select: { id: true, firstName: true, lastName: true, username: true, photoUrl: true } } }
+        include: { user: { select: { id: true, firstName: true, lastName: true, username: true, nickname: true, photoUrl: true } } }
       }
     }
   });
