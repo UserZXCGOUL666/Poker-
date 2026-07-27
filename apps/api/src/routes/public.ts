@@ -11,6 +11,7 @@ import { env } from '../config.js';
 import { AppError } from '../errors.js';
 import { writeAudit } from '../services/audit.js';
 import { deleteProfilePhoto, uploadProfilePhoto } from '../services/profilePhotos.js';
+import { timerPublicRouter } from './timerPublic.js';
 
 export const publicRouter = Router();
 
@@ -43,6 +44,7 @@ publicRouter.get('/users/:id/avatar', async (req, res) => {
 });
 
 publicRouter.use(requireAuth);
+publicRouter.use('/tournaments', timerPublicRouter);
 
 const userSelect = { id: true, firstName: true, lastName: true, username: true, nickname: true, photoUrl: true, points: true } as const;
 
@@ -85,6 +87,7 @@ publicRouter.get('/tournaments', async (req, res) => {
     include: {
       season: { select: { name: true } },
       registrations: { where: { userId: req.auth!.userId }, take: 1 },
+      timer: { select: { id: true } },
       _count: { select: { results: true, registrations: { where: { status: { in: [TournamentRegistrationStatus.REGISTERED, TournamentRegistrationStatus.CHECKED_IN, TournamentRegistrationStatus.PLAYED] } } } } }
     },
     orderBy: { startsAt: 'desc' }
@@ -103,6 +106,8 @@ publicRouter.get('/tournaments', async (req, res) => {
   }
   return res.json(tournaments.map(({ registrations, ...tournament }) => ({
     ...tournament,
+    timerAvailable: Boolean(tournament.timer),
+    timer: undefined,
     participantCount: tournament._count.registrations,
     registration: registrations[0] ? { ...registrations[0], waitlistPosition: waitlistPosition.get(registrations[0].id) ?? null } : null
   })));

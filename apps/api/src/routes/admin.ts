@@ -17,6 +17,7 @@ import { finalizeSeason } from '../services/seasonsFinalization.js';
 import { assignPlayerSeat, autoSeatTournament, getTournamentSeating, unseatPlayer } from '../services/seating.js';
 import { loyaltyAdminRouter } from './loyaltyAdmin.js';
 import { analyticsAdminRouter } from './analyticsAdmin.js';
+import { timerAdminRouter } from './timerAdmin.js';
 
 export const adminRouter = Router();
 
@@ -26,6 +27,7 @@ function serializeTelegramId(value: bigint | null) {
 adminRouter.use(requireAuth, requireAdmin);
 adminRouter.use('/loyalty', loyaltyAdminRouter);
 adminRouter.use('/analytics', analyticsAdminRouter);
+adminRouter.use('/tournaments', timerAdminRouter);
 
 adminRouter.get('/overview', async (_req, res) => {
   const now = new Date();

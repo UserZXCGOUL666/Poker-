@@ -46,8 +46,35 @@ export type Tournament = {
   registrationClosed: boolean;
   registrationDeadline: string | null;
   registration?: { id: string; status: TournamentRegistrationStatus; waitlistPosition: number | null } | null;
+  timerAvailable?: boolean;
   season?: { name: string };
   _count?: { results: number; notifications?: number; registrations?: number };
+};
+
+export type TournamentTimerStatus = 'READY' | 'RUNNING' | 'PAUSED' | 'FINISHED';
+export type TournamentTimerLevelKind = 'LEVEL' | 'BREAK';
+
+export type TournamentTimerLevel = {
+  id: string;
+  position: number;
+  kind: TournamentTimerLevelKind;
+  durationSeconds: number;
+  smallBlind: number | null;
+  bigBlind: number | null;
+  ante: number | null;
+  label: string | null;
+};
+
+export type TournamentTimer = {
+  id: string;
+  tournamentId: string;
+  tournament: Pick<Tournament, 'id' | 'title' | 'status'>;
+  status: TournamentTimerStatus;
+  currentLevelIndex: number;
+  remainingSeconds: number;
+  serverNow: string;
+  updatedAt: string;
+  levels: TournamentTimerLevel[];
 };
 
 export type PointTransaction = {

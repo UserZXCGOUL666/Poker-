@@ -3,7 +3,7 @@ import {
   Armchair, CircleAlert, ClipboardCheck, Coins, Copy, Edit3, Eye, EyeOff, FileStack, Filter, Gift, History, ImagePlus, KeyRound, LayoutDashboard,
   ListChecks, LogOut, Medal, MonitorSmartphone, NotebookPen, Plus, RefreshCw, RotateCcw, Save,
   Search, Settings, ShieldCheck, ShieldOff, Shuffle, Spade, Tags, Trash2, Trophy, UserCheck, UserMinus, UserRound, Play,
-  Users, X, MoreHorizontal, Phone, BarChart3
+  Users, X, MoreHorizontal, Phone, BarChart3, Clock3
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
@@ -17,6 +17,7 @@ import { applyAccentColor, DEFAULT_ACCENT_COLOR, normalizeAccentColor } from '..
 import type { PlayerTag, PointTransaction, Season, Tournament, TournamentRegistrationStatus, User } from '../types';
 import { LoyaltyAdminTab } from './LoyaltyAdminTab';
 import { AnalyticsAdminTab } from './AnalyticsAdminTab';
+import { TournamentTimerPanel } from '../components/TournamentTimerPanel';
 
 type AdminSection = 'overview' | 'players' | 'tournaments' | 'seating' | 'loyalty' | 'analytics' | 'audit' | 'access' | 'settings' | 'more';
 type AdminIntentKind = 'points' | 'newTournament' | 'results' | 'participants' | 'invite' | 'openTournament' | 'seating';
@@ -541,7 +542,7 @@ function TournamentsTab({ seasons, tournaments, users, templates, intent, onDone
   const [filter, setFilter] = useState<'ALL' | Tournament['status']>('ALL');
   const [selectedId, setSelectedId] = useState(tournaments.find((item) => item.status === 'UPCOMING')?.id ?? tournaments[0]?.id ?? '');
   const [detail, setDetail] = useState<TournamentDetails | null>(null);
-  const [view, setView] = useState<'details' | 'participants' | 'results'>('details');
+  const [view, setView] = useState<'details' | 'timer' | 'participants' | 'results'>('details');
   const [createOpen, setCreateOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [templateDefault, setTemplateDefault] = useState<TournamentTemplate | null>(null);
@@ -632,7 +633,7 @@ function TournamentsTab({ seasons, tournaments, users, templates, intent, onDone
       </aside>
       <section className="tournament-detail">{formError && !detail && !loadingDetail && <div className="form-error">{formError}</div>}{loadingDetail && !detail ? <Loading label="Открываем турнир…" /> : detail ? <>
         <header className="tournament-detail-head"><div><Status value={detail.status} /><h2>{detail.title}</h2><p>{tournamentDate(detail.startsAt).full} · {detail.location || 'Место не указано'}</p></div><div><button className="button secondary" disabled={saving || detail.status !== 'UPCOMING'} onClick={() => void notify()}><Bell size={16} />Уведомить</button><button className="icon-button delete-tournament" title="Удалить турнир" onClick={() => void removeTournament()}><Trash2 size={16} /></button></div></header>
-        <div className="player-detail-tabs tournament-tabs"><button className={view === 'details' ? 'active' : ''} onClick={() => setView('details')}><Edit3 />Информация</button><button className={view === 'participants' ? 'active' : ''} onClick={() => setView('participants')}><UserCheck />Участники <span>{detail.registrations.filter((item) => item.status !== 'CANCELLED').length}</span></button><button className={view === 'results' ? 'active' : ''} onClick={() => setView('results')}><Medal />Результаты <span>{detail.results.length}</span></button></div>
+        <div className="player-detail-tabs tournament-tabs"><button className={view === 'details' ? 'active' : ''} onClick={() => setView('details')}><Edit3 />Информация</button><button className={view === 'timer' ? 'active' : ''} onClick={() => setView('timer')}><Clock3 />Таймер</button><button className={view === 'participants' ? 'active' : ''} onClick={() => setView('participants')}><UserCheck />Участники <span>{detail.registrations.filter((item) => item.status !== 'CANCELLED').length}</span></button><button className={view === 'results' ? 'active' : ''} onClick={() => setView('results')}><Medal />Результаты <span>{detail.results.length}</span></button></div>
         {view === 'details' && <form key={detail.id} className="admin-form tournament-edit-form" onSubmit={updateTournament}>
           <label>Название<input name="title" required minLength={2} defaultValue={detail.title} /></label>
           <div className="form-row"><label>Сезон<select name="seasonId" required defaultValue={detail.seasonId}>{seasons.map((season) => <option value={season.id} key={season.id}>{season.name}</option>)}</select></label><label>Дата и время<input name="startsAt" type="datetime-local" required defaultValue={dateTimeInput(detail.startsAt)} /></label></div>
@@ -644,6 +645,7 @@ function TournamentsTab({ seasons, tournaments, users, templates, intent, onDone
           {formError && <div className="form-error">{formError}</div>}
           <button className="button primary wide" disabled={saving}><Save size={17} />{saving ? 'Сохраняем…' : 'Сохранить изменения'}</button>
         </form>}
+        {view === 'timer' && <TournamentTimerPanel tournamentId={detail.id} onNotice={onDone} />}
         {view === 'participants' && <ParticipantsEditor details={detail} users={users} selectedId={registrationUserId} setSelectedId={setRegistrationUserId} saving={saving} error={formError} onAdd={addRegistration} onStatus={setRegistrationStatus} />}
         {view === 'results' && <ResultsEditor key={detail.id} details={detail} users={users} onDone={onDone} onSaved={async () => { await loadDetail(detail.id); }} />}
       </> : <Empty icon={<CalendarDays />} title="Выберите турнир" text="Информация откроется справа" />}</section>

@@ -64,6 +64,18 @@ enum AchievementRule {
   DAILY_HAND_CORRECT
 }
 
+enum TournamentTimerStatus {
+  READY
+  RUNNING
+  PAUSED
+  FINISHED
+}
+
+enum TournamentTimerLevelKind {
+  LEVEL
+  BREAK
+}
+
 model User {
   id                    String                   @id @default(cuid())
   telegramId            BigInt?                  @unique
@@ -196,11 +208,45 @@ model Tournament {
   template             TournamentTemplate?      @relation(fields: [templateId], references: [id], onDelete: SetNull)
   tables               TournamentTable[]
   seats                TournamentSeat[]
+  timer                 TournamentTimer?
 
   @@unique([templateId, startsAt])
   @@index([seasonId, startsAt])
   @@index([status, startsAt])
   @@index([templateId, startsAt])
+}
+
+model TournamentTimer {
+  id                   String                @id @default(cuid())
+  tournamentId         String                @unique
+  status               TournamentTimerStatus @default(READY)
+  currentLevelIndex    Int                   @default(0)
+  remainingSeconds     Int                   @default(0)
+  startedAt            DateTime?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  tournament           Tournament            @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  levels               TournamentTimerLevel[]
+
+  @@index([status, updatedAt])
+}
+
+model TournamentTimerLevel {
+  id              String                   @id @default(cuid())
+  timerId         String
+  position        Int
+  kind            TournamentTimerLevelKind @default(LEVEL)
+  durationSeconds Int
+  smallBlind      Int?
+  bigBlind        Int?
+  ante            Int?
+  label           String?
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+  timer           TournamentTimer          @relation(fields: [timerId], references: [id], onDelete: Cascade)
+
+  @@unique([timerId, position])
+  @@index([timerId, position])
 }
 
 model TournamentResult {

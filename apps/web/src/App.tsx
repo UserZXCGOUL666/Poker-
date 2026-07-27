@@ -10,6 +10,7 @@ import { ProfilePage } from './pages/ProfilePage';
 import { PrivilegesPage } from './pages/PrivilegesPage';
 import { RatingPage } from './pages/RatingPage';
 import { BrowserLoginPage } from './pages/BrowserLoginPage';
+import { TournamentTimerPage } from './pages/TournamentTimerPage';
 import { api } from './lib/api';
 import { applyAccentColor } from './lib/theme';
 
@@ -23,6 +24,7 @@ export default function App() {
   if (error || !user) return <div className="app-shell"><ErrorState message={error ?? 'Откройте приложение из Telegram-бота'} /></div>;
   return (
     <Routes>
+      <Route path="timer/:tournamentId" element={<TournamentTimerPage />} />
       <Route element={<AppShell />}>
         <Route index element={<HomePage />} />
         <Route path="games" element={<GamesPage />} />

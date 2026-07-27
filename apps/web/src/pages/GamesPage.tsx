@@ -1,5 +1,6 @@
 import { CalendarDays, Check, Clock3, ListOrdered, MapPin, UserCheck, Users, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { ErrorState, Loading } from '../components/Loading';
 import { api, post } from '../lib/api';
 import { tournamentDate } from '../lib/format';
@@ -51,6 +52,7 @@ export function GamesPage() {
           <div className="game-card-head"><div className="date-tile"><strong>{date.day}</strong><span>{date.month}</span></div><span className={`status status-${game.status.toLowerCase()}`}>{game.status === 'FINISHED' && <Check size={13} />}{labels[game.status]}</span></div>
           <h2>{game.title}</h2><p>{game.description}</p>
           <div className="game-meta"><span><Clock3 size={16} />{date.time}</span><span><Users size={16} />{game.participantCount || game._count?.results || 0}/{game.capacity}</span>{game.location && <span><MapPin size={16} />{game.location}</span>}</div>
+          {game.status === 'ACTIVE' && game.timerAvailable && <Link className="game-timer-link" to={`/timer/${game.id}`}><Clock3 />Открыть турнирный таймер</Link>}
           {(game.status === 'UPCOMING' || game.status === 'ACTIVE') && <div className={`registration-box registration-${game.registration?.status?.toLowerCase() ?? 'open'}`}>
             {game.registration && game.registration.status !== 'CANCELLED' ? <>
               <span>{game.registration.status === 'WAITLISTED' ? <ListOrdered /> : <UserCheck />}</span>
