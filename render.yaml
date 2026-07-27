@@ -27,7 +27,13 @@ services:
       - key: ADMIN_TELEGRAM_IDS
         sync: false
       - key: CLUB_TIMEZONE
-        value: Europe/Moscow
+        value: Asia/Yekaterinburg
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
 
 databases:
   - name: poker-club-db

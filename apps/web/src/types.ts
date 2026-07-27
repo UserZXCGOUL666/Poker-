@@ -6,7 +6,8 @@ export type PlayerTag = { id: string; name: string; color: string };
 
 export type User = {
   id: string;
-  telegramId: string;
+  telegramId: string | null;
+  email: string | null;
   username: string | null;
   nickname: string | null;
   firstName: string;

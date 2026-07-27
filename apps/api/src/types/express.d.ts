@@ -5,9 +5,9 @@ declare global {
     interface Request {
       auth?: {
         userId: string;
-        telegramId: string;
+        telegramId: string | null;
         role: UserRole;
-        method: 'telegram' | 'browser';
+        method: 'telegram' | 'browser' | 'email';
         sessionId?: string;
       };
     }

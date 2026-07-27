@@ -5,9 +5,9 @@ import { prisma } from '../db.js';
 
 type TokenPayload = {
   sub: string;
-  telegramId: string;
+  telegramId: string | null;
   role: 'PLAYER' | 'ADMIN';
-  authMethod?: 'telegram' | 'browser';
+  authMethod?: 'telegram' | 'browser' | 'email';
   sessionId?: string;
 };
 
@@ -17,10 +17,10 @@ export function createAccessToken(payload: TokenPayload, expiresIn: SignOptions[
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const token = req.headers.authorization?.replace(/^Bearer\s+/i, '');
-  if (!token) return res.status(401).json({ message: 'Требуется авторизация через Telegram' });
+  if (!token) return res.status(401).json({ message: 'Требуется авторизация' });
   try {
     const payload = jwt.verify(token, env.JWT_SECRET) as TokenPayload;
-    if (payload.authMethod === 'browser') {
+    if (payload.authMethod === 'browser' || payload.authMethod === 'email') {
       if (!payload.sessionId) return res.status(401).json({ message: 'Браузерная сессия недействительна' });
       const session = await prisma.browserSession.findFirst({
         where: { id: payload.sessionId, userId: payload.sub, revokedAt: null, expiresAt: { gt: new Date() } },
@@ -42,7 +42,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
 }
 
 export function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  if (!req.auth || !adminTelegramIds.has(req.auth.telegramId)) {
+  if (!req.auth?.telegramId || !adminTelegramIds.has(req.auth.telegramId)) {
     return res.status(403).json({ message: 'Раздел доступен только администраторам' });
   }
   return next();

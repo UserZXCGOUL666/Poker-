@@ -233,10 +233,12 @@ export function ProfilePage() {
       </div>
       <section className="streak-card card"><span><Flame /></span><div><small>ТЕКУЩАЯ СЕРИЯ</small><strong>{profile.stats.currentStreak} посещения</strong><p>Личный рекорд: {profile.stats.bestStreak}</p></div></section>
       {profile.registrations.length > 0 && <><div className="section-title"><h2>Предстоящие игры</h2><Link to="/games">Все игры</Link></div><div className="upcoming-profile-list card">{profile.registrations.map((registration) => <Link to="/games" key={registration.id}><CalendarCheck /><div><strong>{registration.tournament.title}</strong><span>{tournamentDate(registration.tournament.startsAt).full}</span></div><ChevronRight /></Link>)}</div></>}
-      <div className="telegram-id card"><span>Ваш Telegram ID</span><code>{profile.telegramId}</code></div>
-      <section className={`phone-share-card card ${profile.hasPhoneNumber ? 'saved' : ''}`}><span>{profile.hasPhoneNumber ? <CheckCircle2 /> : <Phone />}</span><div><strong>{profile.hasPhoneNumber ? 'Номер передан' : 'Оставить номер организаторам'}</strong><small>{profile.hasPhoneNumber ? `${profile.phoneNumberMasked} · доступен только администраторам` : 'Добровольно — для связи по турнирам и подаркам'}</small></div>{!profile.hasPhoneNumber && <button onClick={requestPhone}>Поделиться</button>}</section>
-      {phoneMessage && <div className="phone-share-message">{phoneMessage}</div>}
-      {phoneFallbackUrl && !profile.hasPhoneNumber && <a className="phone-bot-fallback" href={phoneFallbackUrl}>Открыть бота и передать номер</a>}
+      {profile.telegramId
+        ? <div className="telegram-id card"><span>Ваш Telegram ID</span><code>{profile.telegramId}</code></div>
+        : profile.email && <div className="telegram-id card"><span>Вход по почте</span><code>{profile.email}</code></div>}
+      {profile.telegramId && <section className={`phone-share-card card ${profile.hasPhoneNumber ? 'saved' : ''}`}><span>{profile.hasPhoneNumber ? <CheckCircle2 /> : <Phone />}</span><div><strong>{profile.hasPhoneNumber ? 'Номер передан' : 'Оставить номер организаторам'}</strong><small>{profile.hasPhoneNumber ? `${profile.phoneNumberMasked} · доступен только администраторам` : 'Добровольно — для связи по турнирам и подаркам'}</small></div>{!profile.hasPhoneNumber && <button onClick={requestPhone}>Поделиться</button>}</section>}
+      {profile.telegramId && phoneMessage && <div className="phone-share-message">{phoneMessage}</div>}
+      {profile.telegramId && phoneFallbackUrl && !profile.hasPhoneNumber && <a className="phone-bot-fallback" href={phoneFallbackUrl}>Открыть бота и передать номер</a>}
       {profile.role === 'ADMIN' && <Link className="admin-entry card" to="/admin"><span><ShieldCheck /><span><strong>Управление клубом</strong><small>Турниры, игроки и программа лояльности</small></span></span><ChevronRight /></Link>}
     </>}
 

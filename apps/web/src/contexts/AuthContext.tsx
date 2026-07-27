@@ -8,6 +8,8 @@ type AuthState = {
   error: string | null;
   refresh: () => Promise<void>;
   loginWithBrowserCode: (code: string) => Promise<void>;
+  loginWithEmail: (email: string, password: string) => Promise<void>;
+  registerWithEmail: (firstName: string, email: string, password: string) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -29,6 +31,24 @@ export function AuthProvider({ children }: PropsWithChildren) {
     setError(null);
     setUser(result.user);
     window.history.replaceState({}, '', '/');
+  };
+
+  const acceptBrowserSession = (result: { token: string; user: User }) => {
+    localStorage.setItem('poker-club-token', result.token);
+    localStorage.setItem('poker-club-auth-method', 'browser');
+    setError(null);
+    setUser(result.user);
+    window.history.replaceState({}, '', '/');
+  };
+
+  const loginWithEmail = async (email: string, password: string) => {
+    acceptBrowserSession(await post<{ token: string; user: User; expiresAt: string }>('/auth/email/login', { email, password }));
+  };
+
+  const registerWithEmail = async (firstName: string, email: string, password: string) => {
+    const referralCode = sessionStorage.getItem('poker-club-referral') ?? undefined;
+    acceptBrowserSession(await post<{ token: string; user: User; expiresAt: string }>('/auth/email/register', { firstName, email, password, referralCode }));
+    sessionStorage.removeItem('poker-club-referral');
   };
 
   useEffect(() => {
@@ -65,12 +85,12 @@ export function AuthProvider({ children }: PropsWithChildren) {
             localStorage.removeItem('poker-club-token');
             localStorage.removeItem('poker-club-auth-method');
             if (wasBrowserSession && !telegram?.initData && window.location.pathname !== '/browser-login') {
-              throw new Error('Браузерная сессия истекла или была отозвана. Запросите новую ссылку у администратора.');
+              if (active) setError('Браузерная сессия истекла. Войдите повторно.');
             }
           }
         }
 
-        if (window.location.pathname === '/browser-login' && !telegram?.initData) return;
+        if (!telegram?.initData && !import.meta.env.VITE_DEV_TELEGRAM_ID) return;
 
         const devId = import.meta.env.VITE_DEV_TELEGRAM_ID;
         const referralCode = sessionStorage.getItem('poker-club-referral') ?? undefined;
@@ -98,7 +118,10 @@ export function AuthProvider({ children }: PropsWithChildren) {
     return () => { active = false; };
   }, []);
 
-  const value = useMemo(() => ({ user, loading, error, refresh, loginWithBrowserCode }), [user, loading, error]);
+  const value = useMemo(
+    () => ({ user, loading, error, refresh, loginWithBrowserCode, loginWithEmail, registerWithEmail }),
+    [user, loading, error]
+  );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

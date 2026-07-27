@@ -86,8 +86,8 @@ async function main() {
     });
 
     const rotated = [...users].sort((a, b) => {
-      const av = (Number(a.telegramId % 97n) + week * 11) % 53;
-      const bv = (Number(b.telegramId % 97n) + week * 11) % 53;
+      const av = (Number(a.telegramId! % 97n) + week * 11) % 53;
+      const bv = (Number(b.telegramId! % 97n) + week * 11) % 53;
       return av - bv;
     });
     await prisma.tournamentResult.createMany({

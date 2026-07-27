@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { UserRole } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 import { z } from 'zod';
 import { adminTelegramIds, env } from '../config.js';
 import { prisma } from '../db.js';
@@ -15,6 +15,7 @@ import { validateTelegramInitData, type TelegramUserData } from '../services/tel
 import { createReferralForNewUser, ensureReferralCode, recordDailyAppOpen } from '../services/loyalty.js';
 import { getBotUsername } from '../bot.js';
 import { writeAudit } from '../services/audit.js';
+import { hashPassword, normalizeEmail, verifyPassword } from '../services/passwordAuth.js';
 
 export const authRouter = Router();
 
@@ -80,6 +81,102 @@ authRouter.get('/browser/config', async (_req, res) => {
   return res.json({ botUsername, botUrl: botUsername ? `https://t.me/${botUsername}?start=browser_login` : null });
 });
 
+const emailRegisterSchema = z.object({
+  firstName: z.string().trim().min(2, 'Укажите имя или никнейм').max(50),
+  email: z.string().trim().email('Проверьте адрес электронной почты').max(254),
+  password: z.string().min(8, 'Пароль должен содержать минимум 8 символов').max(128),
+  referralCode: z.string().trim().max(32).optional()
+});
+
+const emailLoginSchema = z.object({
+  email: z.string().trim().email('Проверьте адрес электронной почты').max(254),
+  password: z.string().min(1).max(128)
+});
+
+async function createEmailSession(userId: string) {
+  return prisma.browserSession.create({
+    data: { userId, expiresAt: browserSessionExpiresAt(new Date()) }
+  });
+}
+
+authRouter.post('/email/register', async (req, res, next) => {
+  try {
+    const input = emailRegisterSchema.parse(req.body);
+    const email = normalizeEmail(input.email);
+    const passwordHash = await hashPassword(input.password);
+    const existing = await prisma.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' } }, select: { id: true } });
+    if (existing) throw new AppError('Аккаунт с такой почтой уже существует', 409, 'EMAIL_ALREADY_EXISTS');
+
+    const result = await prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          telegramId: null,
+          email,
+          passwordHash,
+          firstName: input.firstName,
+          nickname: input.firstName,
+          role: UserRole.PLAYER
+        }
+      });
+      const session = await tx.browserSession.create({
+        data: { userId: user.id, expiresAt: browserSessionExpiresAt(new Date()) }
+      });
+      await writeAudit(tx, {
+        actorId: user.id,
+        action: 'EMAIL_ACCOUNT_CREATED',
+        entityType: 'User',
+        entityId: user.id,
+        summary: `${user.firstName} зарегистрировался по электронной почте`,
+        metadata: { authMethod: 'email' }
+      });
+      return { user, session };
+    });
+    await ensureReferralCode(result.user.id).catch((error) => console.error('Не удалось создать реферальный код email-профиля', error));
+    await createReferralForNewUser(result.user.id, input.referralCode).catch((error) => console.error('Не удалось применить реферальный код email-профиля', error));
+    await recordDailyAppOpen(result.user.id).catch((error) => console.error('Не удалось записать открытие приложения', error));
+    const token = createAccessToken({
+      sub: result.user.id,
+      telegramId: null,
+      role: UserRole.PLAYER,
+      authMethod: 'email',
+      sessionId: result.session.id
+    }, '30d');
+    return res.status(201).json({ token, user: serializeUser(result.user), expiresAt: result.session.expiresAt });
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return next(new AppError('Аккаунт с такой почтой уже существует', 409, 'EMAIL_ALREADY_EXISTS'));
+    }
+    return next(error);
+  }
+});
+
+authRouter.post('/email/login', async (req, res, next) => {
+  try {
+    const input = emailLoginSchema.parse(req.body);
+    const email = normalizeEmail(input.email);
+    const user = await prisma.user.findFirst({ where: { email: { equals: email, mode: 'insensitive' } } });
+    if (!user?.passwordHash || !await verifyPassword(input.password, user.passwordHash)) {
+      throw new AppError('Неверная почта или пароль', 401, 'INVALID_EMAIL_CREDENTIALS');
+    }
+    if (user.role !== UserRole.PLAYER) {
+      await prisma.user.update({ where: { id: user.id }, data: { role: UserRole.PLAYER } });
+      user.role = UserRole.PLAYER;
+    }
+    const session = await createEmailSession(user.id);
+    await recordDailyAppOpen(user.id).catch((error) => console.error('Не удалось записать открытие приложения', error));
+    const token = createAccessToken({
+      sub: user.id,
+      telegramId: null,
+      role: UserRole.PLAYER,
+      authMethod: 'email',
+      sessionId: session.id
+    }, '30d');
+    return res.json({ token, user: serializeUser(user), expiresAt: session.expiresAt });
+  } catch (error) {
+    return next(error);
+  }
+});
+
 authRouter.post('/browser/exchange', async (req, res, next) => {
   try {
     const { token } = browserExchangeSchema.parse(req.body);
@@ -104,6 +201,7 @@ authRouter.post('/browser/exchange', async (req, res, next) => {
       return { user: invite.user, session };
     });
 
+    if (!result.user.telegramId) throw new AppError('Для этой ссылки не найден Telegram-профиль', 401, 'INVALID_BROWSER_INVITE');
     const telegramId = result.user.telegramId.toString();
     const role = adminTelegramIds.has(telegramId) ? UserRole.ADMIN : UserRole.PLAYER;
     const user = result.user.role === role
@@ -155,6 +253,7 @@ authRouter.post('/browser/code/exchange', async (req, res, next) => {
       return { user: loginCode.user, session };
     });
 
+    if (!result.user.telegramId) throw new AppError('Для этого кода не найден Telegram-профиль', 401, 'INVALID_BROWSER_CODE');
     const telegramId = result.user.telegramId.toString();
     const role = adminTelegramIds.has(telegramId) ? UserRole.ADMIN : UserRole.PLAYER;
     const user = result.user.role === role ? result.user : await prisma.user.update({ where: { id: result.user.id }, data: { role } });
@@ -166,17 +265,18 @@ authRouter.post('/browser/code/exchange', async (req, res, next) => {
 authRouter.get('/me', requireAuth, async (req, res) => {
   let user = await prisma.user.findUnique({ where: { id: req.auth!.userId } });
   if (!user) return res.status(404).json({ message: 'Пользователь не найден' });
-  const expectedRole = adminTelegramIds.has(user.telegramId.toString()) ? UserRole.ADMIN : UserRole.PLAYER;
+  const expectedRole = user.telegramId && adminTelegramIds.has(user.telegramId.toString()) ? UserRole.ADMIN : UserRole.PLAYER;
   if (user.role !== expectedRole) {
     user = await prisma.user.update({ where: { id: user.id }, data: { role: expectedRole } });
   }
   return res.json(serializeUser(user));
 });
 
-function serializeUser(user: { id: string; telegramId: bigint; username: string | null; nickname: string | null; firstName: string; lastName: string | null; photoUrl: string | null; role: UserRole; points: number; clubXp: number }) {
+function serializeUser(user: { id: string; telegramId: bigint | null; email: string | null; username: string | null; nickname: string | null; firstName: string; lastName: string | null; photoUrl: string | null; role: UserRole; points: number; clubXp: number }) {
   return {
     id: user.id,
-    telegramId: user.telegramId.toString(),
+    telegramId: user.telegramId?.toString() ?? null,
+    email: user.email,
     username: user.username,
     nickname: user.nickname,
     firstName: user.firstName,

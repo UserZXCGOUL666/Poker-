@@ -10,6 +10,7 @@ import { answerDailyHand, ensureReferralCode, evaluateAchievements, getDailyCont
 import { env } from '../config.js';
 import { AppError } from '../errors.js';
 import { writeAudit } from '../services/audit.js';
+import { deleteProfilePhoto, uploadProfilePhoto } from '../services/profilePhotos.js';
 
 export const publicRouter = Router();
 
@@ -194,6 +195,7 @@ publicRouter.get('/profile', async (req, res) => {
     select: {
       ...userSelect,
       telegramId: true,
+      email: true,
       role: true,
       clubXp: true,
       referralCode: true,
@@ -232,7 +234,7 @@ publicRouter.get('/profile', async (req, res) => {
   ]);
   return res.json({
     ...user,
-    telegramId: user.telegramId.toString(),
+    telegramId: user.telegramId?.toString() ?? null,
     phoneNumber: undefined,
     hasPhoneNumber: Boolean(user.phoneNumber),
     phoneNumberMasked: user.phoneNumber ? `${user.phoneNumber.slice(0, 4)}••••${user.phoneNumber.slice(-2)}` : null,
@@ -287,20 +289,29 @@ publicRouter.patch('/profile', async (req, res, next) => {
     }
     const before = await prisma.user.findUnique({
       where: { id: req.auth!.userId },
-      select: { id: true, nickname: true, profilePhotoData: true }
+      select: { id: true, nickname: true, profilePhotoData: true, profilePhotoPublicId: true }
     });
     if (!before) throw new AppError('Пользователь не найден', 404, 'USER_NOT_FOUND');
     const data: Prisma.UserUpdateInput = {};
     if (input.nickname !== undefined) data.nickname = nickname;
+    let uploadedPhoto: { url: string; publicId: string } | null = null;
     if (input.photoData !== undefined) {
-      data.profilePhotoData = input.photoData === null ? null : validateProfilePhoto(input.photoData);
-      data.photoUrl = input.photoData === null ? null : `/users/${before.id}/avatar?v=${Date.now()}`;
+      if (input.photoData === null) {
+        data.profilePhotoData = null;
+        data.profilePhotoPublicId = null;
+        data.photoUrl = null;
+      } else {
+        uploadedPhoto = await uploadProfilePhoto(before.id, validateProfilePhoto(input.photoData));
+        data.profilePhotoData = null;
+        data.profilePhotoPublicId = uploadedPhoto.publicId;
+        data.photoUrl = uploadedPhoto.url;
+      }
     }
     const updated = await prisma.$transaction(async (tx) => {
       const user = await tx.user.update({
         where: { id: req.auth!.userId },
         data,
-        select: { id: true, telegramId: true, username: true, nickname: true, firstName: true, lastName: true, photoUrl: true, role: true, points: true, clubXp: true }
+        select: { id: true, telegramId: true, email: true, username: true, nickname: true, firstName: true, lastName: true, photoUrl: true, role: true, points: true, clubXp: true }
       });
       await writeAudit(tx, {
         actorId: user.id,
@@ -313,7 +324,8 @@ publicRouter.patch('/profile', async (req, res, next) => {
       });
       return user;
     });
-    return res.json({ ...updated, telegramId: updated.telegramId.toString() });
+    if (input.photoData === null) await deleteProfilePhoto(before.profilePhotoPublicId);
+    return res.json({ ...updated, telegramId: updated.telegramId?.toString() ?? null });
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       return next(new AppError('Этот никнейм уже занят', 409, 'NICKNAME_TAKEN'));

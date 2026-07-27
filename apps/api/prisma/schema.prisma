@@ -66,13 +66,16 @@ enum AchievementRule {
 
 model User {
   id                    String                   @id @default(cuid())
-  telegramId            BigInt                   @unique
+  telegramId            BigInt?                  @unique
+  email                 String?                  @unique
+  passwordHash          String?
   username              String?
   nickname              String?
   firstName             String
   lastName              String?
   photoUrl              String?
   profilePhotoData      String?                  @db.Text
+  profilePhotoPublicId  String?
   role                  UserRole                 @default(PLAYER)
   points                Int                      @default(0)
   clubXp                Int                      @default(0)

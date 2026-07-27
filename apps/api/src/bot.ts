@@ -280,7 +280,7 @@ async function broadcastRecipients(audience: BroadcastAudience) {
     : audience === 'tournament'
       ? { registrations: { some: { status: { in: [TournamentRegistrationStatus.REGISTERED, TournamentRegistrationStatus.WAITLISTED, TournamentRegistrationStatus.CHECKED_IN] }, tournament: { status: { in: ['UPCOMING', 'ACTIVE'] } } } } }
       : {};
-  return prisma.user.findMany({ where, select: { id: true, telegramId: true } });
+  return prisma.user.findMany({ where: { AND: [where, { telegramId: { not: null } }] }, select: { id: true, telegramId: true } });
 }
 
 async function performBroadcast(ctx: Context, draft: BroadcastDraft, actorId: string) {
@@ -290,6 +290,7 @@ async function performBroadcast(ctx: Context, draft: BroadcastDraft, actorId: st
   let failedCount = 0;
   for (const recipient of recipients) {
     try {
+      if (!recipient.telegramId) continue;
       await bot.api.sendMessage(recipient.telegramId.toString(), draft.text, {
         reply_markup: new InlineKeyboard().webApp('🎮 Открыть Poker Club', appUrl('/'))
       });
@@ -494,13 +495,14 @@ export async function notifyAboutTournament(tournamentId: string) {
   if (!bot) throw new Error('TELEGRAM_BOT_TOKEN не настроен');
   const tournament = await prisma.tournament.findUnique({ where: { id: tournamentId } });
   if (!tournament) throw new Error('Турнир не найден');
-  const users = await prisma.user.findMany({ select: { telegramId: true } });
+  const users = await prisma.user.findMany({ where: { telegramId: { not: null } }, select: { telegramId: true } });
   const date = formatDate(tournament.startsAt);
   const keyboard = new InlineKeyboard().webApp('Открыть турниры', appUrl('/games'));
   let sentCount = 0;
   let failedCount = 0;
   for (const user of users) {
     try {
+      if (!user.telegramId) continue;
       await bot.api.sendMessage(user.telegramId.toString(), `♠️ Напоминание: «${tournament.title}» состоится ${date}.`, { reply_markup: keyboard });
       sentCount += 1;
     } catch {
@@ -511,7 +513,8 @@ export async function notifyAboutTournament(tournamentId: string) {
   return { sentCount, failedCount };
 }
 
-export async function notifyUser(telegramId: bigint | string, text: string) {
+export async function notifyUser(telegramId: bigint | string | null, text: string) {
+  if (!telegramId) return { sent: false, reason: 'NO_TELEGRAM_ACCOUNT' as const };
   if (!bot) return { sent: false, reason: 'BOT_DISABLED' as const };
   try {
     await bot.api.sendMessage(telegramId.toString(), text, { reply_markup: new InlineKeyboard().webApp('Открыть Poker Club', appUrl('/')) });

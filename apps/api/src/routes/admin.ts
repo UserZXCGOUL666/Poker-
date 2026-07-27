@@ -19,6 +19,10 @@ import { loyaltyAdminRouter } from './loyaltyAdmin.js';
 import { analyticsAdminRouter } from './analyticsAdmin.js';
 
 export const adminRouter = Router();
+
+function serializeTelegramId(value: bigint | null) {
+  return value?.toString() ?? null;
+}
 adminRouter.use(requireAuth, requireAdmin);
 adminRouter.use('/loyalty', loyaltyAdminRouter);
 adminRouter.use('/analytics', analyticsAdminRouter);
@@ -201,7 +205,7 @@ adminRouter.get('/users', async (req, res) => {
   });
   return res.json(users.map(({ results, tags, ...user }) => ({
     ...user,
-    telegramId: user.telegramId.toString(),
+    telegramId: serializeTelegramId(user.telegramId),
     lastPlayedAt: results[0]?.tournament.startsAt ?? null,
     tags: tags.map((item) => item.tag)
   })));
@@ -231,7 +235,7 @@ adminRouter.get('/users/:id', async (req, res) => {
   });
   if (!user) return res.status(404).json({ message: 'Пользователь не найден' });
   const { profilePhotoData: _profilePhotoData, ...safeUser } = user;
-  return res.json({ ...safeUser, telegramId: user.telegramId.toString(), tags: user.tags.map((item) => item.tag) });
+  return res.json({ ...safeUser, telegramId: serializeTelegramId(user.telegramId), tags: user.tags.map((item) => item.tag) });
 });
 
 const userNoteSchema = z.object({ note: z.string().max(2000).nullable() });
@@ -348,7 +352,7 @@ adminRouter.post('/browser-access/invites', async (req, res, next) => {
     return res.status(201).json({
       url: url.toString(),
       expiresAt,
-      user: { ...user, telegramId: user.telegramId.toString() }
+      user: { ...user, telegramId: serializeTelegramId(user.telegramId) }
     });
   } catch (error) { return next(error); }
 });
@@ -365,7 +369,7 @@ adminRouter.get('/browser-access/sessions', async (req, res) => {
   });
   return res.json(sessions.map((session) => ({
     ...session,
-    user: { ...session.user, telegramId: session.user.telegramId.toString() }
+    user: { ...session.user, telegramId: serializeTelegramId(session.user.telegramId) }
   })));
 });
 
@@ -393,8 +397,8 @@ adminRouter.post('/points', async (req, res, next) => {
     const notification = result.duplicate ? null : await notifyUser(result.user.telegramId, pointsNotification(data.amount, result.user.points, data.reason));
     return res.status(result.duplicate ? 200 : 201).json({
       ...result,
-      user: { ...result.user, telegramId: result.user.telegramId.toString() },
-      transaction: { ...result.transaction, user: { ...result.transaction.user, telegramId: result.transaction.user.telegramId.toString() } },
+      user: { ...result.user, telegramId: serializeTelegramId(result.user.telegramId) },
+      transaction: { ...result.transaction, user: { ...result.transaction.user, telegramId: serializeTelegramId(result.transaction.user.telegramId) } },
       notification
     });
   } catch (error) { return next(error); }
@@ -423,7 +427,7 @@ adminRouter.post('/points/bulk', async (req, res, next) => {
     }));
     return res.status(result.duplicate ? 200 : 201).json({
       ...result,
-      batch: { ...result.batch, transactions: result.batch.transactions.map((transaction) => ({ ...transaction, user: { ...transaction.user, telegramId: transaction.user.telegramId.toString() } })) },
+      batch: { ...result.batch, transactions: result.batch.transactions.map((transaction) => ({ ...transaction, user: { ...transaction.user, telegramId: serializeTelegramId(transaction.user.telegramId) } })) },
       notifications
     });
   } catch (error) { return next(error); }
@@ -437,7 +441,7 @@ adminRouter.post('/points/:id/reverse', async (req, res, next) => {
     const notification = result.duplicate ? null : await notifyUser(result.transaction.user.telegramId, pointsNotification(result.transaction.amount, result.transaction.balanceAfter, result.transaction.reason));
     return res.status(result.duplicate ? 200 : 201).json({
       ...result,
-      transaction: { ...result.transaction, user: { ...result.transaction.user, telegramId: result.transaction.user.telegramId.toString() } },
+      transaction: { ...result.transaction, user: { ...result.transaction.user, telegramId: serializeTelegramId(result.transaction.user.telegramId) } },
       notification
     });
   } catch (error) { return next(error); }
@@ -621,7 +625,7 @@ adminRouter.get('/tournaments/:id', async (req, res) => {
     ...tournament,
     registrations: tournament.registrations.map((registration) => ({
       ...registration,
-      user: { ...registration.user, telegramId: registration.user.telegramId.toString(), tags: registration.user.tags.map((item) => item.tag) }
+      user: { ...registration.user, telegramId: serializeTelegramId(registration.user.telegramId), tags: registration.user.tags.map((item) => item.tag) }
     }))
   });
 });
@@ -680,7 +684,7 @@ adminRouter.post('/tournaments/:id/registrations', async (req, res, next) => {
     const { userId } = z.object({ userId: z.string().min(1) }).parse(req.body);
     const result = await registerForTournament(req.params.id, userId, { actorId: req.auth!.userId, actorIsAdmin: true });
     const notification = result.duplicate ? null : await notifyUser(result.user.telegramId, registrationNotification(result.tournament.title, result.tournament.startsAt, result.registration.status === TournamentRegistrationStatus.WAITLISTED ? 'WAITLISTED' : 'REGISTERED'));
-    return res.status(result.duplicate ? 200 : 201).json({ ...result, user: { ...result.user, telegramId: result.user.telegramId.toString() }, notification });
+    return res.status(result.duplicate ? 200 : 201).json({ ...result, user: { ...result.user, telegramId: serializeTelegramId(result.user.telegramId) }, notification });
   } catch (error) { return next(error); }
 });
 
@@ -697,7 +701,7 @@ adminRouter.patch('/registrations/:id', async (req, res, next) => {
     const promotionNotification = result.promoted
       ? await notifyUser(result.promoted.user.telegramId, registrationNotification(result.tournament.title, result.tournament.startsAt, 'PROMOTED'))
       : null;
-    return res.json({ ...result, user: { ...result.user, telegramId: result.user.telegramId.toString() }, promoted: result.promoted ? { ...result.promoted, user: { ...result.promoted.user, telegramId: result.promoted.user.telegramId.toString() } } : null, notification, promotionNotification });
+    return res.json({ ...result, user: { ...result.user, telegramId: serializeTelegramId(result.user.telegramId) }, promoted: result.promoted ? { ...result.promoted, user: { ...result.promoted.user, telegramId: serializeTelegramId(result.promoted.user.telegramId) } } : null, notification, promotionNotification });
   } catch (error) { return next(error); }
 });
 

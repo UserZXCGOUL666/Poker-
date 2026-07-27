@@ -19,7 +19,7 @@ export default function App() {
     void api<{ accentColor: string }>('/branding/theme').then((theme) => applyAccentColor(theme.accentColor)).catch(() => undefined);
   }, []);
   if (loading) return <div className="app-shell"><Loading /></div>;
-  if (window.location.pathname === '/browser-login' && !user) return <BrowserLoginPage />;
+  if (!user && !window.Telegram?.WebApp?.initData) return <BrowserLoginPage />;
   if (error || !user) return <div className="app-shell"><ErrorState message={error ?? 'Откройте приложение из Telegram-бота'} /></div>;
   return (
     <Routes>
