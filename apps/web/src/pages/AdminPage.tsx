@@ -1203,31 +1203,34 @@ function defaultTournamentScore(index: number) { return [500, 350, 250, 150, 100
 async function prepareRatingBanner(file: File) {
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('Выберите PNG, JPEG или WebP');
   if (file.size > 8 * 1024 * 1024) throw new Error('Исходный файл должен быть меньше 8 МБ');
-  const url = URL.createObjectURL(file);
-  try {
-    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const element = new Image();
-      element.onload = () => resolve(element);
-      element.onerror = () => reject(new Error('Изображение повреждено или не поддерживается'));
-      element.src = url;
-    });
-    const width = 1400;
-    const height = 560;
-    const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight);
-    const sourceWidth = width / scale;
-    const sourceHeight = height / scale;
-    const sourceX = Math.max(0, (image.naturalWidth - sourceWidth) / 2);
-    const sourceY = Math.max(0, (image.naturalHeight - sourceHeight) / 2);
-    const canvas = document.createElement('canvas');
-    canvas.width = width; canvas.height = height;
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error('Браузер не поддерживает обработку изображений');
-    context.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, width, height);
-    let data = canvas.toDataURL('image/webp', .8);
-    if (!data.startsWith('data:image/webp')) data = canvas.toDataURL('image/jpeg', .82);
-    if (data.length > 850_000) throw new Error('После обработки изображение всё ещё слишком большое. Выберите более простой файл.');
-    return data;
-  } finally { URL.revokeObjectURL(url); }
+  const source = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error('Не удалось прочитать изображение'));
+    reader.readAsDataURL(file);
+  });
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const element = new Image();
+    element.onload = () => resolve(element);
+    element.onerror = () => reject(new Error('Изображение повреждено или не поддерживается'));
+    element.src = source;
+  });
+  const width = 1400;
+  const height = 560;
+  const scale = Math.max(width / image.naturalWidth, height / image.naturalHeight);
+  const sourceWidth = width / scale;
+  const sourceHeight = height / scale;
+  const sourceX = Math.max(0, (image.naturalWidth - sourceWidth) / 2);
+  const sourceY = Math.max(0, (image.naturalHeight - sourceHeight) / 2);
+  const canvas = document.createElement('canvas');
+  canvas.width = width; canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Браузер не поддерживает обработку изображений');
+  context.drawImage(image, sourceX, sourceY, sourceWidth, sourceHeight, 0, 0, width, height);
+  let data = canvas.toDataURL('image/webp', .8);
+  if (!data.startsWith('data:image/webp')) data = canvas.toDataURL('image/jpeg', .82);
+  if (data.length > 850_000) throw new Error('После обработки изображение всё ещё слишком большое. Выберите более простой файл.');
+  return data;
 }
 function isSessionActive(session: BrowserSession) { return !session.revokedAt && new Date(session.expiresAt) > new Date(); }
 function registrationStatusLabel(value: TournamentRegistrationStatus) { return { REGISTERED: 'В основном списке', WAITLISTED: 'Лист ожидания', CHECKED_IN: 'Присутствие подтверждено', PLAYED: 'Сыграл', CANCELLED: 'Отменено' }[value]; }

@@ -3,6 +3,7 @@ import {
   createRetryableInitializer,
   displayName,
   hasAdminAccess,
+  miniAppLaunchUrl,
   miniAppUrl,
   normalizePhoneNumber,
   normalizeTelegramWebhookSecret,
@@ -39,6 +40,11 @@ describe('bot helpers', () => {
   it('builds Mini App deep links without keeping stale query parameters', () => {
     expect(miniAppUrl('https://club.example/?old=1', '/admin', { section: 'seating' }))
       .toBe('https://club.example/admin?section=seating');
+  });
+
+  it('opens player sections through the canonical Mini App entry point', () => {
+    expect(miniAppLaunchUrl('https://club.example/old?stale=1', 'games'))
+      .toBe('https://club.example/?view=games');
   });
 
   it('normalizes own Telegram contact numbers', () => {

@@ -58,6 +58,10 @@ export function miniAppUrl(baseUrl: string, path = '/', params: MiniAppParams = 
   return base.toString();
 }
 
+export function miniAppLaunchUrl(baseUrl: string, view?: 'games' | 'profile' | 'rating' | 'privileges') {
+  return miniAppUrl(baseUrl, '/', view ? { view } : {});
+}
+
 export function normalizePhoneNumber(value: string) {
   let digits = value.replace(/\D/g, '');
   if (digits.startsWith('00')) digits = digits.slice(2);

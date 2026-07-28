@@ -1,6 +1,5 @@
-import { Brain, CheckCircle2, ChevronDown, Coins, Lightbulb, Sparkles, XCircle } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Brain, CheckCircle2, ChevronDown, Coins, Lightbulb, XCircle } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { api, post } from '../lib/api';
 import type { DailyContent } from '../types';
 
@@ -26,7 +25,7 @@ function countdown(target: string, now: number) {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
-export function DailyEngagement() {
+export function DailyEngagement({ between }: { between: ReactNode }) {
   const [data, setData] = useState<DailyContent | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -81,15 +80,9 @@ export function DailyEngagement() {
     });
   }
 
-  if (!data || (!data.tip && !data.hand)) return null;
+  if (!data || (!data.tip && !data.hand)) return <>{between}</>;
   const attempt = data.hand?.attempt;
   return <section className="daily-engagement">
-    <Link className="loyalty-strip" to="/privileges">
-      <span><Sparkles /></span>
-      <div><small>КЛУБНЫЕ БОНУСЫ</small><strong>{data.clubXp.toLocaleString('ru-RU')} Club XP</strong></div>
-      <span className="loyalty-strip-action">Открыть</span>
-    </Link>
-    {data.tip && <article className="daily-tip-card card"><span><Lightbulb /></span><div><small>{data.tip.category} · СОВЕТ ДНЯ</small><h3>{data.tip.title}</h3><p>{data.tip.body}</p></div></article>}
     {data.hand && <article className="daily-hand-card card">
       <header><span><Brain /></span><div><small>ЗАДАЧКА ДНЯ · {data.hand.difficulty}</small><h3>{data.hand.title}</h3></div><em>+{data.hand.rewardXp} XP</em></header>
       <p>{data.hand.scenario}</p>
@@ -117,5 +110,7 @@ export function DailyEngagement() {
       </>}
       {error && <div className="form-error">{error}</div>}
     </article>}
+    {between}
+    {data.tip && <article className="daily-tip-card card"><span><Lightbulb /></span><div><small>{data.tip.category} · СОВЕТ ДНЯ</small><h3>{data.tip.title}</h3><p>{data.tip.body}</p></div></article>}
   </section>;
 }

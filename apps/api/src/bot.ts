@@ -15,6 +15,7 @@ import {
   createRetryableInitializer,
   displayName,
   hasAdminAccess,
+  miniAppLaunchUrl,
   miniAppUrl,
   normalizePhoneNumber,
   registrationLabel
@@ -40,6 +41,10 @@ const BROADCAST_DRAFT_TTL = 30 * 60 * 1000;
 
 function appUrl(path = '/', params: Record<string, string | number | undefined> = {}) {
   return miniAppUrl(env.MINI_APP_URL, path, params);
+}
+
+function playerAppUrl(view?: 'games' | 'profile' | 'rating' | 'privileges') {
+  return miniAppLaunchUrl(env.MINI_APP_URL, view);
 }
 
 function miniAppUrlWithReferral(rawMatch: string | undefined) {
@@ -75,8 +80,8 @@ async function ensureBotUser(sender: BotSender) {
 
 function playerKeyboard() {
   return new Keyboard()
-    .webApp(PLAYER_BUTTONS.openClub, appUrl('/')).row()
-    .text(PLAYER_BUTTONS.tournaments).text(PLAYER_BUTTONS.profile).row()
+    .webApp(PLAYER_BUTTONS.openClub, playerAppUrl()).row()
+    .webApp(PLAYER_BUTTONS.tournaments, playerAppUrl('games')).text(PLAYER_BUTTONS.profile).row()
     .text(PLAYER_BUTTONS.rating).text(PLAYER_BUTTONS.help).row()
     .requestContact(PLAYER_BUTTONS.phone)
     .resized().persistent().placeholder('Выберите раздел');
@@ -173,7 +178,7 @@ async function sendPlayerTournaments(ctx: Context) {
   const items = [active, upcoming].filter((item, index, all) => item && all.findIndex((candidate) => candidate?.id === item.id) === index);
   if (!items.length) {
     await ctx.reply('🏆 Активных и ближайших турниров пока нет.', {
-      reply_markup: new InlineKeyboard().webApp('Открыть все турниры', appUrl('/games'))
+      reply_markup: new InlineKeyboard().webApp('Открыть все турниры', playerAppUrl('games'))
     });
     return;
   }
@@ -183,7 +188,7 @@ async function sendPlayerTournaments(ctx: Context) {
     const registration = registrationLabel({ ...item!, participantCount: participants });
     return `${status}\n${item!.title}\n📅 ${formatDate(item!.startsAt)}\n👥 ${participants}/${item!.capacity}\n🎟 ${registration}`;
   }).join('\n\n');
-  await ctx.reply(text, { reply_markup: new InlineKeyboard().webApp('🏆 Открыть турниры', appUrl('/games')) });
+  await ctx.reply(text, { reply_markup: new InlineKeyboard().webApp('🏆 Открыть турниры', playerAppUrl('games')) });
 }
 
 async function sendPlayerProfile(ctx: Context) {
@@ -195,7 +200,7 @@ async function sendPlayerProfile(ctx: Context) {
   ]);
   const phone = user.phoneNumber ? `сохранён ${user.phoneNumber.slice(0, 4)}••••${user.phoneNumber.slice(-2)}` : 'не указан — используйте кнопку внизу';
   await ctx.reply(`👤 ${displayName(user)}\n\n🎯 Rating PTS: ${user.points.toLocaleString('ru-RU')}\n🏆 Сыграно турниров: ${gamesPlayed}\n📊 Позиция в рейтинге: #${usersAhead + 1}\n📱 Телефон: ${phone}`, {
-    reply_markup: new InlineKeyboard().webApp('Открыть полный профиль', appUrl('/profile'))
+    reply_markup: new InlineKeyboard().webApp('Открыть полный профиль', playerAppUrl('profile'))
   });
 }
 
@@ -207,7 +212,7 @@ async function sendPlayerRating(ctx: Context) {
     prisma.user.count()
   ]);
   await ctx.reply(`📊 Ваша позиция: #${usersAhead + 1} из ${totalUsers}\n🎯 Баланс: ${user.points.toLocaleString('ru-RU')} Rating PTS`, {
-    reply_markup: new InlineKeyboard().webApp('Открыть полный рейтинг', appUrl('/rating'))
+    reply_markup: new InlineKeyboard().webApp('Открыть полный рейтинг', playerAppUrl('rating'))
   });
 }
 
@@ -497,7 +502,7 @@ export async function notifyAboutTournament(tournamentId: string) {
   if (!tournament) throw new Error('Турнир не найден');
   const users = await prisma.user.findMany({ where: { telegramId: { not: null } }, select: { telegramId: true } });
   const date = formatDate(tournament.startsAt);
-  const keyboard = new InlineKeyboard().webApp('Открыть турниры', appUrl('/games'));
+  const keyboard = new InlineKeyboard().webApp('Открыть турниры', playerAppUrl('games'));
   let sentCount = 0;
   let failedCount = 0;
   for (const user of users) {

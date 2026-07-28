@@ -22,8 +22,10 @@ export function AppShell() {
       <header className="brand-header">
         <div className="brand-mark">PL</div>
         <div className="brand-copy"><strong>POKER CLUB</strong><span>Спортивная лига</span></div>
-        {user?.role === 'ADMIN' && <NavLink className="admin-shortcut" to="/admin" aria-label="Админка"><ShieldCheck size={19} /></NavLink>}
-        {user && <NavLink className="header-profile-link" to="/profile" aria-label="Открыть профиль"><Avatar firstName={user.firstName} lastName={user.lastName} photoUrl={user.photoUrl} /></NavLink>}
+        <div className="header-actions">
+          {user?.role === 'ADMIN' && <NavLink className="admin-shortcut" to="/admin" aria-label="Админка"><ShieldCheck size={19} /></NavLink>}
+          {user && <NavLink className="header-profile-link" to="/profile" aria-label="Открыть профиль"><Avatar firstName={user.firstName} lastName={user.lastName} photoUrl={user.photoUrl} /></NavLink>}
+        </div>
       </header>
       <main className="app-content"><Outlet /></main>
       <nav className="bottom-nav">

@@ -54,7 +54,20 @@ publicRouter.get('/home', async (req, res) => {
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
   const [season, nextTournament, leaders, usersAhead, totalUsers, weeklyResult, finalTables, gamesPlayed, branding, nextSeating] = await Promise.all([
     prisma.season.findFirst({ where: { isActive: true }, orderBy: { startsAt: 'desc' } }),
-    prisma.tournament.findFirst({ where: { status: 'UPCOMING', startsAt: { gte: new Date() } }, orderBy: { startsAt: 'asc' } }),
+    prisma.tournament.findFirst({
+      where: { status: 'UPCOMING', startsAt: { gte: new Date() } },
+      orderBy: { startsAt: 'asc' },
+      include: {
+        registrations: { where: { userId: req.auth!.userId }, take: 1 },
+        _count: {
+          select: {
+            registrations: {
+              where: { status: { in: [TournamentRegistrationStatus.REGISTERED, TournamentRegistrationStatus.CHECKED_IN, TournamentRegistrationStatus.PLAYED] } }
+            }
+          }
+        }
+      }
+    }),
     prisma.user.findMany({ orderBy: [{ points: 'desc' }, { createdAt: 'asc' }], take: 3, select: userSelect }),
     prisma.user.count({ where: { points: { gt: user.points } } }),
     prisma.user.count(),
@@ -72,7 +85,13 @@ publicRouter.get('/home', async (req, res) => {
     season,
     week: season ? Math.max(1, Math.ceil((Date.now() - season.startsAt.getTime()) / (7 * 24 * 60 * 60 * 1000))) : 1,
     user: { ...user, rank: usersAhead + 1, totalUsers },
-    nextTournament,
+    nextTournament: nextTournament ? {
+      ...nextTournament,
+      participantCount: nextTournament._count.registrations,
+      registration: nextTournament.registrations[0] ?? null,
+      registrations: undefined,
+      _count: undefined
+    } : null,
     weeklyPoints: weeklyResult._sum.amount ?? 0,
     finalTables,
     gamesPlayed,
@@ -294,7 +313,7 @@ publicRouter.patch('/profile', async (req, res, next) => {
     }
     const before = await prisma.user.findUnique({
       where: { id: req.auth!.userId },
-      select: { id: true, nickname: true, profilePhotoData: true, profilePhotoPublicId: true }
+      select: { id: true, nickname: true, photoUrl: true, profilePhotoData: true, profilePhotoPublicId: true }
     });
     if (!before) throw new AppError('Пользователь не найден', 404, 'USER_NOT_FOUND');
     const data: Prisma.UserUpdateInput = {};
@@ -306,10 +325,19 @@ publicRouter.patch('/profile', async (req, res, next) => {
         data.profilePhotoPublicId = null;
         data.photoUrl = null;
       } else {
-        uploadedPhoto = await uploadProfilePhoto(before.id, validateProfilePhoto(input.photoData));
-        data.profilePhotoData = null;
-        data.profilePhotoPublicId = uploadedPhoto.publicId;
-        data.photoUrl = uploadedPhoto.url;
+        const validatedPhoto = validateProfilePhoto(input.photoData);
+        try {
+          uploadedPhoto = await uploadProfilePhoto(before.id, validatedPhoto);
+          data.profilePhotoData = null;
+          data.profilePhotoPublicId = uploadedPhoto.publicId;
+          data.photoUrl = uploadedPhoto.url;
+        } catch (cause) {
+          if (!(cause instanceof AppError) || !['CLOUDINARY_NOT_CONFIGURED', 'PROFILE_PHOTO_UPLOAD_FAILED'].includes(cause.code)) throw cause;
+          console.warn(`Profile photo for ${before.id} stored in database fallback: ${cause.code}`);
+          data.profilePhotoData = validatedPhoto;
+          data.profilePhotoPublicId = null;
+          data.photoUrl = `/users/${before.id}/avatar?v=${Date.now()}`;
+        }
       }
     }
     const updated = await prisma.$transaction(async (tx) => {
@@ -324,7 +352,7 @@ publicRouter.patch('/profile', async (req, res, next) => {
         entityType: 'User',
         entityId: user.id,
         summary: 'Игрок обновил профиль',
-        before: { nickname: before.nickname, hasCustomPhoto: Boolean(before.profilePhotoData) },
+        before: { nickname: before.nickname, hasCustomPhoto: Boolean(before.photoUrl) },
         after: { nickname: user.nickname, hasCustomPhoto: Boolean(user.photoUrl) }
       });
       return user;
