@@ -5,7 +5,7 @@ import { Avatar } from './Avatar';
 
 const navItems = [
   { to: '/', label: 'Главная', icon: Home },
-  { to: '/games', label: 'Игры', icon: CalendarDays },
+  { to: '/games', label: 'Турниры', icon: CalendarDays },
   { to: '/rating', label: 'Рейтинг', icon: BarChart3 },
   { to: '/privileges', label: 'Привилегии', icon: Gift },
   { to: '/profile', label: 'Профиль', icon: UserRound }
@@ -15,10 +15,11 @@ export function AppShell() {
   const { user } = useAuth();
   const location = useLocation();
   const adminMode = location.pathname.startsWith('/admin');
+  const gamesMode = location.pathname.startsWith('/games');
 
   if (adminMode) return <Outlet />;
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${gamesMode ? 'app-shell-games' : ''}`}>
       <header className="brand-header">
         <div className="brand-mark">PL</div>
         <div className="brand-copy"><strong>POKER CLUB</strong><span>Спортивная лига</span></div>

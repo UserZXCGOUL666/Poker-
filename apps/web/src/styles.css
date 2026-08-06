@@ -178,6 +178,91 @@ a { color: inherit; text-decoration: none; }
 .status-finished { color: #a4b4ca; background: rgba(140, 158, 183, .1); border: 1px solid rgba(140, 158, 183, .18); }
 .status-cancelled { color: #ff8290; background: rgba(255, 104, 119, .1); border: 1px solid rgba(255, 104, 119, .22); }
 
+/* Weekly tournament diary */
+.games-diary-page { max-width: 920px; margin: 0 auto; }
+.games-diary-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 17px; }
+.games-diary-heading .page-heading { margin-bottom: 0; }
+.week-navigation { position: relative; min-width: 310px; min-height: 58px; display: grid; grid-template-columns: 46px minmax(150px, 1fr) 46px; align-items: center; gap: 7px; padding: 6px; border: 1px solid #223956; border-radius: 15px; background: linear-gradient(145deg, #0c1b2f, #081522); }
+.week-navigation > button { width: 46px; height: 46px; display: grid; place-items: center; padding: 0; color: #a9c7ec; border: 1px solid #294566; border-radius: 11px; background: #10233b; cursor: pointer; }
+.week-navigation > button:active { transform: scale(.96); }
+.week-navigation > button svg { width: 18px; }
+.week-navigation > div { display: flex; min-width: 0; align-items: center; flex-direction: column; gap: 4px; text-align: center; }
+.week-navigation strong { font-size: 12px; white-space: nowrap; }
+.week-navigation span { color: #758da9; font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+.week-navigation .week-today-button { position: absolute; right: 0; bottom: -25px; width: auto; height: 20px; display: inline-flex; gap: 4px; padding: 0 4px; color: #7eacf0; border: 0; background: transparent; font-size: 8px; font-weight: 800; }
+.week-navigation .week-today-button svg { width: 11px; }
+.week-diary { overflow: hidden; border: 1px solid #223650; border-radius: 18px; background: #08131f; box-shadow: 0 20px 55px rgba(0, 0, 0, .18); }
+.week-day-row { min-height: 72px; display: grid; grid-template-columns: 148px minmax(0, 1fr); border-bottom: 1px solid #1c3048; }
+.week-day-row:last-child { border-bottom: 0; }
+.week-day-row.is-today { background: linear-gradient(90deg, rgba(var(--accent-rgb), .08), transparent 44%); }
+.week-day-row.is-past { background-color: rgba(120, 139, 165, .025); }
+.week-day-label { display: flex; align-items: flex-start; justify-content: space-between; flex-direction: column; gap: 8px; padding: 13px 12px 12px 15px; border-right: 1px solid #1c3048; }
+.week-day-label > div { display: flex; flex-direction: column; gap: 4px; }
+.week-day-label strong { font-size: 11px; }
+.week-day-label span { color: #758ba5; font-size: 9px; }
+.week-day-label em { width: max-content; padding: 4px 6px; color: #71839a; border-radius: 99px; background: rgba(124, 143, 169, .09); font-size: 6px; font-style: normal; font-weight: 900; letter-spacing: .1em; }
+.week-day-row.is-today .week-day-label em { color: #8dc0ff; background: rgba(var(--accent-rgb), .12); }
+.week-day-content { min-width: 0; display: grid; gap: 6px; padding: 6px; }
+.week-day-empty { min-height: 58px; display: flex; align-items: center; gap: 7px; padding: 0 12px; color: #5f748e; font-size: 9px; }
+.week-day-empty svg { width: 14px; }
+.diary-tournament { position: relative; min-width: 0; min-height: 78px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 11px 12px 11px 15px; overflow: hidden; border: 1px solid #29435f; border-radius: 12px; background: linear-gradient(145deg, #0d2038, #0a192a); }
+.diary-tournament::before { position: absolute; inset: 0 auto 0 0; width: 3px; content: ''; background: #438af0; }
+.diary-active { border-color: rgba(70, 217, 139, .3); background: linear-gradient(145deg, rgba(22, 78, 56, .36), #0a1d20); }
+.diary-active::before { background: var(--green); }
+.diary-finished, .diary-cancelled { border-color: #283849; background: linear-gradient(145deg, #101923, #0b131c); }
+.diary-finished::before, .diary-cancelled::before { background: #748398; }
+.diary-finished .diary-tournament-main, .diary-cancelled .diary-tournament-main { opacity: .7; }
+.diary-title-row { min-width: 0; display: flex; align-items: center; gap: 10px; }
+.diary-title-row h2 { min-width: 0; margin: 0; overflow: hidden; font-size: 14px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.diary-status { flex: none; display: inline-flex; align-items: center; gap: 3px; padding: 4px 7px; border-radius: 99px; font-size: 7px; font-weight: 900; letter-spacing: .08em; }
+.diary-status svg { width: 9px; }
+.diary-status-upcoming { color: #8bc0ff; border: 1px solid rgba(73, 144, 240, .28); background: rgba(52, 126, 226, .12); }
+.diary-status-active { color: #84e8b1; border: 1px solid rgba(70, 217, 139, .26); background: rgba(70, 217, 139, .1); }
+.diary-status-finished, .diary-status-cancelled { color: #9cabbc; border: 1px solid rgba(140, 158, 183, .18); background: rgba(140, 158, 183, .08); }
+.diary-meta { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 5px 12px; margin-top: 9px; color: #8fa6c0; font-size: 8px; }
+.diary-meta span { min-width: 0; display: inline-flex; align-items: center; gap: 4px; }
+.diary-meta svg { width: 11px; flex: none; }
+.diary-location { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diary-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 5px; }
+.diary-actions > button, .diary-timer-button { min-height: 40px; display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 11px; border-radius: 9px; font-size: 8px; font-weight: 800; white-space: nowrap; cursor: pointer; }
+.diary-actions svg { width: 13px; }
+.diary-register-button { color: #06170f; border: 1px solid #48dc8c; background: var(--green); }
+.diary-register-button.registered { color: #9de9c0; border-color: rgba(70, 217, 139, .25); background: rgba(70, 217, 139, .09); }
+.diary-register-button:disabled { cursor: default; opacity: .72; }
+.diary-timer-button { color: #9fcbff; border: 1px solid #2a5f9d; background: #12325a; }
+.diary-cancel-button { color: #a9b7c7; border: 0; background: transparent; }
+.diary-tournament.game-card-focused { animation: diaryFocus 1.25s ease-out; }
+@keyframes diaryFocus { 0%, 45% { box-shadow: 0 0 0 2px var(--blue), 0 0 30px rgba(var(--accent-rgb), .25); } 100% { box-shadow: none; } }
+
+@media (max-width: 700px) {
+  .games-diary-heading { align-items: stretch; flex-direction: column; gap: 12px; }
+  .week-navigation { min-width: 0; }
+  .week-navigation .week-today-button { position: static; grid-column: 1 / -1; width: 100%; min-height: 30px; margin-top: -2px; border: 0; }
+  .week-day-row { grid-template-columns: 1fr; }
+  .week-day-label { min-height: 44px; align-items: center; flex-direction: row; padding: 8px 10px 7px; border-right: 0; border-bottom: 1px solid #1b2d42; }
+  .week-day-label > div { align-items: baseline; flex-direction: row; gap: 6px; }
+  .week-day-content { padding: 5px; }
+  .diary-tournament { grid-template-columns: 1fr; gap: 10px; padding: 12px 11px 11px 14px; }
+  .diary-title-row { align-items: flex-start; justify-content: space-between; }
+  .diary-title-row h2 { display: -webkit-box; overflow: hidden; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  .diary-meta { display: grid; grid-template-columns: 1fr 1fr; }
+  .diary-location { max-width: none; grid-column: 1 / -1; }
+  .diary-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); justify-content: stretch; }
+  .diary-actions > button, .diary-timer-button { min-height: 44px; padding: 0 8px; }
+  .diary-cancel-button { grid-column: 1 / -1; min-height: 34px !important; }
+}
+
+@media (max-width: 390px) {
+  .games-diary-page .page-heading h1 { font-size: 27px; }
+  .week-navigation { grid-template-columns: 44px minmax(0, 1fr) 44px; }
+  .week-navigation > button { width: 44px; height: 44px; }
+  .week-navigation strong { font-size: 11px; }
+  .diary-meta { grid-template-columns: 1fr; }
+  .diary-location { grid-column: auto; }
+  .diary-actions { grid-template-columns: 1fr; }
+  .diary-cancel-button { grid-column: auto; }
+}
+
 .search-field { height: 45px; display: flex; align-items: center; gap: 9px; padding: 0 13px; margin-bottom: 15px; color: var(--muted); background: #091426; border: 1px solid var(--line); border-radius: 12px; }
 .search-field input { min-width: 0; flex: 1; border: 0; outline: none; color: white; background: transparent; font-size: 13px; }
 .ranking-table { margin: 0 -4px; }
@@ -762,6 +847,11 @@ a { color: inherit; text-decoration: none; }
 @media (min-width: 481px) {
   .app-shell { margin-top: 18px; margin-bottom: 18px; min-height: calc(100dvh - 36px); border: 1px solid #1b2c45; border-radius: 34px; overflow: hidden; box-shadow: 0 30px 90px rgba(0, 0, 0, .45); }
   .bottom-nav { bottom: 18px; border-radius: 0 0 34px 34px; }
+}
+
+@media (min-width: 760px) {
+  .app-shell-games { width: min(calc(100% - 36px), 920px); }
+  .app-shell-games .bottom-nav { width: min(calc(100% - 36px), 920px); }
 }
 
 /* Admin workspace v1.3 */
