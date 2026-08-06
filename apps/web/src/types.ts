@@ -1,6 +1,7 @@
 export type Role = 'PLAYER' | 'ADMIN';
 export type TournamentStatus = 'UPCOMING' | 'ACTIVE' | 'FINISHED' | 'CANCELLED';
 export type TournamentRegistrationStatus = 'REGISTERED' | 'WAITLISTED' | 'CHECKED_IN' | 'PLAYED' | 'CANCELLED';
+export type TournamentPlayerActionType = 'REBUY' | 'REENTRY' | 'ELIMINATION' | 'BOUNTY' | 'BONUS_XP';
 
 export type PlayerTag = { id: string; name: string; color: string };
 

@@ -1,9 +1,11 @@
+import crypto from 'node:crypto';
 import { Router } from 'express';
-import { ReasonPresetKind, TournamentRegistrationStatus, TournamentStatus } from '@prisma/client';
+import { ClubXpSource, ReasonPresetKind, TournamentPlayerActionType, TournamentRegistrationStatus, TournamentStatus } from '@prisma/client';
 import { z } from 'zod';
 import { notifyAboutTournament, notifyUser, pointsNotification, registrationNotification } from '../bot.js';
 import { env } from '../config.js';
 import { prisma } from '../db.js';
+import { AppError } from '../errors.js';
 import { requireAdmin, requireAuth } from '../middleware/auth.js';
 import { browserInviteExpiresAt, createBrowserInviteToken, hashBrowserInviteToken } from '../services/browserAccess.js';
 import { applyManualPointChange } from '../services/points.js';
@@ -14,7 +16,8 @@ import { applyBulkPointChanges, reversePointTransaction } from '../services/poin
 import { registerForTournament, shouldNotifyRegistrationStatusChange, updateRegistrationStatus } from '../services/registrations.js';
 import { generateRecurringTournaments } from '../services/recurringTournaments.js';
 import { finalizeSeason } from '../services/seasonsFinalization.js';
-import { assignPlayerSeat, autoSeatTournament, getTournamentSeating, unseatPlayer } from '../services/seating.js';
+import { applyClubXpInTransaction } from '../services/loyalty.js';
+import { assignPlayerSeat, autoSeatTournament, closeTournamentTable, createTournamentTable, getTournamentSeating, unseatPlayer, updateTournamentTableCapacity } from '../services/seating.js';
 import { loyaltyAdminRouter } from './loyaltyAdmin.js';
 import { analyticsAdminRouter } from './analyticsAdmin.js';
 import { timerAdminRouter } from './timerAdmin.js';
@@ -614,10 +617,10 @@ adminRouter.get('/tournaments/:id', async (req, res) => {
     where: { id: req.params.id },
     include: {
       season: true,
-      results: { orderBy: { place: 'asc' }, include: { user: { select: { id: true, firstName: true, lastName: true, username: true, nickname: true } } } },
+      results: { orderBy: { place: 'asc' }, include: { user: { select: { id: true, firstName: true, lastName: true, username: true, nickname: true, photoUrl: true, points: true, clubXp: true } } } },
       registrations: {
         orderBy: [{ status: 'asc' }, { createdAt: 'asc' }],
-        include: { user: { select: { id: true, telegramId: true, firstName: true, lastName: true, username: true, nickname: true, points: true, tags: { include: { tag: true } } } } }
+        include: { user: { select: { id: true, telegramId: true, firstName: true, lastName: true, username: true, nickname: true, photoUrl: true, points: true, clubXp: true, tags: { include: { tag: true } } } } }
       },
       pointBatches: { orderBy: { createdAt: 'desc' }, take: 5, include: { _count: { select: { transactions: true } } } }
     }
@@ -707,6 +710,136 @@ adminRouter.patch('/registrations/:id', async (req, res, next) => {
   } catch (error) { return next(error); }
 });
 
+
+const tournamentActionSchema = z.object({
+  userId: z.string().min(1),
+  targetUserId: z.string().min(1).optional(),
+  type: z.nativeEnum(TournamentPlayerActionType),
+  value: z.coerce.number().int().min(1).max(100_000).default(1),
+  note: z.string().trim().max(300).optional()
+}).superRefine((data, context) => {
+  if (data.type === TournamentPlayerActionType.BOUNTY && !data.targetUserId) {
+    context.addIssue({ code: 'custom', path: ['targetUserId'], message: 'Для баунти укажите выбывшего игрока' });
+  }
+  if (data.targetUserId && data.targetUserId === data.userId) {
+    context.addIssue({ code: 'custom', path: ['targetUserId'], message: 'Игрок не может быть целью самого себя' });
+  }
+});
+
+adminRouter.get('/tournaments/:id/actions', async (req, res, next) => {
+  try {
+    const actions = await prisma.tournamentPlayerAction.findMany({
+      where: { tournamentId: req.params.id }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 500,
+      include: {
+        user: { select: { id: true, firstName: true, lastName: true, username: true, nickname: true, photoUrl: true } },
+        targetUser: { select: { id: true, firstName: true, lastName: true, username: true, nickname: true, photoUrl: true } },
+        createdBy: { select: { id: true, firstName: true, lastName: true, username: true } }
+      }
+    });
+    return res.json(actions);
+  } catch (error) { return next(error); }
+});
+
+adminRouter.post('/tournaments/:id/actions', async (req, res, next) => {
+  try {
+    const data = tournamentActionSchema.parse(req.body);
+    const action = await prisma.$transaction(async (tx) => {
+      const tournament = await tx.tournament.findUnique({ where: { id: req.params.id }, select: { id: true, title: true, status: true } });
+      if (!tournament) throw new AppError('Турнир не найден', 404, 'TOURNAMENT_NOT_FOUND');
+      if (tournament.status === TournamentStatus.FINISHED || tournament.status === TournamentStatus.CANCELLED) {
+        throw new AppError('Операции доступны только для текущего турнира', 409, 'TOURNAMENT_ACTIONS_LOCKED');
+      }
+      const registration = await tx.tournamentRegistration.findUnique({
+        where: { tournamentId_userId: { tournamentId: tournament.id, userId: data.userId } },
+        include: { user: { select: { id: true, firstName: true, lastName: true, username: true, nickname: true } } }
+      });
+      if (!registration || registration.status === TournamentRegistrationStatus.CANCELLED || registration.status === TournamentRegistrationStatus.WAITLISTED) {
+        throw new AppError('Игрок должен находиться в основном списке турнира', 409, 'PLAYER_NOT_IN_TOURNAMENT');
+      }
+      const target = data.targetUserId ? await tx.tournamentRegistration.findUnique({
+        where: { tournamentId_userId: { tournamentId: tournament.id, userId: data.targetUserId } },
+        include: { user: { select: { id: true, firstName: true, lastName: true, username: true, nickname: true } } }
+      }) : null;
+      if (data.targetUserId && (!target || target.status === TournamentRegistrationStatus.CANCELLED || target.status === TournamentRegistrationStatus.WAITLISTED)) {
+        throw new AppError('Целевой игрок не участвует в турнире', 409, 'TARGET_NOT_IN_TOURNAMENT');
+      }
+      const lastStateAction = await tx.tournamentPlayerAction.findFirst({
+        where: { tournamentId: tournament.id, userId: data.userId, type: { in: [TournamentPlayerActionType.ELIMINATION, TournamentPlayerActionType.REENTRY] } },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
+      });
+      if (data.type === TournamentPlayerActionType.ELIMINATION && lastStateAction?.type === TournamentPlayerActionType.ELIMINATION) {
+        throw new AppError('Игрок уже отмечен выбывшим', 409, 'PLAYER_ALREADY_ELIMINATED');
+      }
+      if (data.type === TournamentPlayerActionType.REENTRY && lastStateAction?.type !== TournamentPlayerActionType.ELIMINATION) {
+        throw new AppError('Повторный вход доступен после выбывания', 409, 'REENTRY_REQUIRES_ELIMINATION');
+      }
+      if (data.type === TournamentPlayerActionType.REBUY && lastStateAction?.type === TournamentPlayerActionType.ELIMINATION) {
+        throw new AppError('Для выбывшего игрока используйте повторный вход', 409, 'REBUY_REQUIRES_ACTIVE_PLAYER');
+      }
+      if (data.type === TournamentPlayerActionType.BOUNTY && target) {
+        const targetLastStateAction = await tx.tournamentPlayerAction.findFirst({
+          where: { tournamentId: tournament.id, userId: target.userId, type: { in: [TournamentPlayerActionType.ELIMINATION, TournamentPlayerActionType.REENTRY] } },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }]
+        });
+        if (targetLastStateAction?.type !== TournamentPlayerActionType.ELIMINATION) {
+          await tx.tournamentSeat.deleteMany({ where: { tournamentId: tournament.id, userId: target.userId } });
+          await tx.tournament.update({ where: { id: tournament.id }, data: { seatingPublishedAt: null, seatingVersion: { increment: 1 } } });
+          const eliminated = await tx.tournamentPlayerAction.create({
+            data: {
+              tournamentId: tournament.id,
+              userId: target.userId,
+              createdById: req.auth!.userId,
+              type: TournamentPlayerActionType.ELIMINATION,
+              value: 1,
+              note: `Выбывание по баунти от ${registration.user.nickname || registration.user.username || registration.user.firstName}`
+            }
+          });
+          const eliminatedName = target.user.nickname || target.user.username || `${target.user.firstName} ${target.user.lastName ?? ''}`.trim();
+          await writeAudit(tx, {
+            actorId: req.auth!.userId,
+            action: 'TOURNAMENT_ELIMINATION',
+            entityType: 'TournamentPlayerAction',
+            entityId: eliminated.id,
+            summary: `Выбыл по баунти: ${eliminatedName}`,
+            after: { tournamentId: tournament.id, userId: target.userId, type: TournamentPlayerActionType.ELIMINATION, value: 1, source: 'BOUNTY', bountyByUserId: data.userId }
+          });
+        }
+      }
+      if (data.type === TournamentPlayerActionType.BONUS_XP) {
+        await applyClubXpInTransaction(tx, {
+          userId: data.userId, amount: data.value, source: ClubXpSource.ADMIN_ADJUSTMENT,
+          reason: data.note || `Бонус за турнир «${tournament.title}»`,
+          idempotencyKey: `tournament:${tournament.id}:xp:${crypto.randomUUID()}`,
+          createdById: req.auth!.userId,
+          metadata: { tournamentId: tournament.id }
+        });
+      }
+      if (data.type === TournamentPlayerActionType.ELIMINATION) {
+        await tx.tournamentSeat.deleteMany({ where: { tournamentId: tournament.id, userId: data.userId } });
+        await tx.tournament.update({ where: { id: tournament.id }, data: { seatingPublishedAt: null, seatingVersion: { increment: 1 } } });
+      }
+      const created = await tx.tournamentPlayerAction.create({
+        data: { tournamentId: tournament.id, userId: data.userId, targetUserId: data.targetUserId, createdById: req.auth!.userId, type: data.type, value: data.value, note: data.note }
+      });
+      const playerName = registration.user.nickname || registration.user.username || `${registration.user.firstName} ${registration.user.lastName ?? ''}`.trim();
+      const targetName = target ? target.user.nickname || target.user.username || `${target.user.firstName} ${target.user.lastName ?? ''}`.trim() : null;
+      const labels: Record<TournamentPlayerActionType, string> = {
+        REBUY: `Ребай: ${playerName}`,
+        REENTRY: `Повторный вход: ${playerName}`,
+        ELIMINATION: `Выбыл: ${playerName}`,
+        BOUNTY: `Баунти: ${playerName}${targetName ? ` выбил ${targetName}` : ''}`,
+        BONUS_XP: `Бонус ${data.value} Club XP: ${playerName}`
+      };
+      await writeAudit(tx, {
+        actorId: req.auth!.userId, action: `TOURNAMENT_${data.type}`, entityType: 'TournamentPlayerAction', entityId: created.id,
+        summary: labels[data.type], after: { tournamentId: tournament.id, userId: data.userId, targetUserId: data.targetUserId ?? null, type: data.type, value: data.value, note: data.note ?? null }
+      });
+      return created;
+    });
+    return res.status(201).json(action);
+  } catch (error) { return next(error); }
+});
+
 const autoSeatingSchema = z.object({
   capacityPerTable: z.coerce.number().int().min(2).max(10),
   tableCount: z.coerce.number().int().positive().optional(),
@@ -722,6 +855,29 @@ const seatAssignmentSchema = z.object({
 adminRouter.get('/tournaments/:id/seating', async (req, res, next) => {
   try { return res.json(await getTournamentSeating(req.params.id)); }
   catch (error) { return next(error); }
+});
+
+
+const tableSchema = z.object({ capacity: z.coerce.number().int().min(2).max(10) });
+
+adminRouter.post('/tournaments/:id/seating/tables', async (req, res, next) => {
+  try {
+    const { capacity } = tableSchema.parse(req.body);
+    return res.status(201).json(await createTournamentTable({ tournamentId: req.params.id, actorId: req.auth!.userId, capacity }));
+  } catch (error) { return next(error); }
+});
+
+adminRouter.patch('/tournaments/:id/seating/tables/:tableId', async (req, res, next) => {
+  try {
+    const { capacity } = tableSchema.parse(req.body);
+    return res.json(await updateTournamentTableCapacity({ tournamentId: req.params.id, tableId: req.params.tableId, actorId: req.auth!.userId, capacity }));
+  } catch (error) { return next(error); }
+});
+
+adminRouter.delete('/tournaments/:id/seating/tables/:tableId', async (req, res, next) => {
+  try {
+    return res.json(await closeTournamentTable({ tournamentId: req.params.id, tableId: req.params.tableId, actorId: req.auth!.userId }));
+  } catch (error) { return next(error); }
 });
 
 adminRouter.post('/tournaments/:id/seating/generate', async (req, res, next) => {

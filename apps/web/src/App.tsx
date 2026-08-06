@@ -41,6 +41,8 @@ export default function App() {
       telegram?.offEvent?.('viewportChanged', syncInsets);
     };
   }, []);
+  const publicTimerRoute = /^\/timer\/[^/]+\/?$/.test(location.pathname);
+  if (publicTimerRoute) return <Routes><Route path="timer/:tournamentId" element={<TournamentTimerPage />} /><Route path="*" element={<Navigate to="/" replace />} /></Routes>;
   if (loading) return <div className="app-shell"><Loading /></div>;
   if (!user && !window.Telegram?.WebApp?.initData) return <BrowserLoginPage />;
   if (error || !user) return <div className="app-shell"><ErrorState message={error ?? 'Откройте приложение из Telegram-бота'} /></div>;
@@ -49,7 +51,6 @@ export default function App() {
   if (launchPath) return <Navigate to={launchPath} replace />;
   return (
     <Routes>
-      <Route path="timer/:tournamentId" element={<TournamentTimerPage />} />
       <Route element={<AppShell />}>
         <Route index element={<HomePage />} />
         <Route path="games" element={<GamesPage />} />

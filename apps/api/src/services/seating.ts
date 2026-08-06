@@ -222,3 +222,70 @@ export async function unseatPlayer(input: { tournamentId: string; actorId: strin
   });
   return getTournamentSeating(input.tournamentId);
 }
+
+export async function createTournamentTable(input: { tournamentId: string; actorId: string; capacity: number }) {
+  await serializable(() => prisma.$transaction(async (tx) => {
+    const tournament = await tx.tournament.findUnique({
+      where: { id: input.tournamentId },
+      include: { tables: { orderBy: { number: 'desc' }, take: 1 } }
+    });
+    if (!tournament) throw new AppError('Турнир не найден', 404, 'TOURNAMENT_NOT_FOUND');
+    if (isLockedStatus(tournament.status)) throw new AppError('Нельзя менять столы завершённого или отменённого турнира', 409, 'SEATING_LOCKED');
+    if (!Number.isInteger(input.capacity) || input.capacity < 2 || input.capacity > 10) {
+      throw new AppError('За столом может быть от 2 до 10 мест', 400, 'INVALID_TABLE_CAPACITY');
+    }
+    const number = (tournament.tables[0]?.number ?? 0) + 1;
+    const table = await tx.tournamentTable.create({ data: { tournamentId: tournament.id, number, capacity: input.capacity } });
+    await tx.tournament.update({ where: { id: tournament.id }, data: { seatingPublishedAt: null, seatingVersion: { increment: 1 } } });
+    await writeAudit(tx, {
+      actorId: input.actorId, action: 'TOURNAMENT_TABLE_CREATED', entityType: 'TournamentSeating', entityId: tournament.id,
+      summary: `Создан стол №${number} для «${tournament.title}»`, after: { tableId: table.id, number, capacity: table.capacity }
+    });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }));
+  return getTournamentSeating(input.tournamentId);
+}
+
+export async function updateTournamentTableCapacity(input: { tournamentId: string; tableId: string; actorId: string; capacity: number }) {
+  await serializable(() => prisma.$transaction(async (tx) => {
+    const table = await tx.tournamentTable.findFirst({
+      where: { id: input.tableId, tournamentId: input.tournamentId },
+      include: { tournament: true, seats: { orderBy: { seatNumber: 'desc' }, take: 1 } }
+    });
+    if (!table) throw new AppError('Стол не найден', 404, 'TABLE_NOT_FOUND');
+    if (isLockedStatus(table.tournament.status)) throw new AppError('Нельзя менять столы завершённого или отменённого турнира', 409, 'SEATING_LOCKED');
+    if (!Number.isInteger(input.capacity) || input.capacity < 2 || input.capacity > 10) {
+      throw new AppError('За столом может быть от 2 до 10 мест', 400, 'INVALID_TABLE_CAPACITY');
+    }
+    const highestOccupiedSeat = table.seats[0]?.seatNumber ?? 0;
+    if (input.capacity < highestOccupiedSeat) {
+      throw new AppError(`Сначала освободите места выше №${input.capacity}`, 409, 'TABLE_CAPACITY_OCCUPIED');
+    }
+    await tx.tournamentTable.update({ where: { id: table.id }, data: { capacity: input.capacity } });
+    await tx.tournament.update({ where: { id: table.tournamentId }, data: { seatingPublishedAt: null, seatingVersion: { increment: 1 } } });
+    await writeAudit(tx, {
+      actorId: input.actorId, action: 'TOURNAMENT_TABLE_UPDATED', entityType: 'TournamentSeating', entityId: table.tournamentId,
+      summary: `Изменено количество мест за столом №${table.number}`, before: { capacity: table.capacity }, after: { capacity: input.capacity }
+    });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }));
+  return getTournamentSeating(input.tournamentId);
+}
+
+export async function closeTournamentTable(input: { tournamentId: string; tableId: string; actorId: string }) {
+  await serializable(() => prisma.$transaction(async (tx) => {
+    const table = await tx.tournamentTable.findFirst({
+      where: { id: input.tableId, tournamentId: input.tournamentId },
+      include: { tournament: true, seats: { select: { userId: true, seatNumber: true } } }
+    });
+    if (!table) throw new AppError('Стол не найден', 404, 'TABLE_NOT_FOUND');
+    if (isLockedStatus(table.tournament.status)) throw new AppError('Нельзя менять столы завершённого или отменённого турнира', 409, 'SEATING_LOCKED');
+    await tx.tournamentTable.delete({ where: { id: table.id } });
+    await tx.tournament.update({ where: { id: table.tournamentId }, data: { seatingPublishedAt: null, seatingVersion: { increment: 1 } } });
+    await writeAudit(tx, {
+      actorId: input.actorId, action: 'TOURNAMENT_TABLE_CLOSED', entityType: 'TournamentSeating', entityId: table.tournamentId,
+      summary: `Закрыт стол №${table.number} в «${table.tournament.title}»`,
+      before: { tableId: table.id, number: table.number, capacity: table.capacity, seats: table.seats },
+      after: { returnedToUnseated: table.seats.length }
+    });
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }));
+  return getTournamentSeating(input.tournamentId);
+}

@@ -1,8 +1,8 @@
 import {
-  ArrowDown, ArrowUp, Copy, Edit3, ExternalLink, FastForward, Pause, Play,
+  ArrowDown, ArrowUp, Copy, Edit3, ExternalLink, FastForward, Maximize2, Pause, Play,
   Plus, Rewind, Save, TimerReset, Trash2, X
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { api, post } from '../lib/api';
 import { blindLabel, resolveTimerDisplay, timerClock, timerDuration } from '../lib/tournamentTimer';
@@ -12,10 +12,10 @@ import { Loading } from './Loading';
 type DraftLevel = {
   key: string;
   kind: TournamentTimerLevelKind;
-  durationMinutes: number;
-  smallBlind: number;
-  bigBlind: number;
-  ante: number;
+  durationMinutes: string;
+  smallBlind: string;
+  bigBlind: string;
+  ante: string;
   label: string;
 };
 
@@ -25,21 +25,22 @@ function toDraft(timer: TournamentTimer): DraftLevel[] {
   return timer.levels.map((level) => ({
     key: level.id || makeKey(),
     kind: level.kind,
-    durationMinutes: Math.max(1, Math.round(level.durationSeconds / 60)),
-    smallBlind: level.smallBlind ?? 0,
-    bigBlind: level.bigBlind ?? 0,
-    ante: level.ante ?? 0,
+    durationMinutes: String(Math.max(1, Math.round(level.durationSeconds / 60))),
+    smallBlind: level.smallBlind == null ? '' : String(level.smallBlind),
+    bigBlind: level.bigBlind == null ? '' : String(level.bigBlind),
+    ante: level.ante == null ? '' : String(level.ante),
     label: level.label ?? ''
   }));
 }
 
-export function TournamentTimerPanel({ tournamentId, onNotice }: { tournamentId: string; onNotice: (message: string) => void }) {
+export function TournamentTimerPanel({ tournamentId, onNotice, compact = false }: { tournamentId: string; onNotice: (message: string) => void; compact?: boolean }) {
   const [timer, setTimer] = useState<TournamentTimer | null>(null);
   const [now, setNow] = useState(Date.now());
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<DraftLevel[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setBusy(true);
@@ -89,16 +90,30 @@ export function TournamentTimerPanel({ tournamentId, onNotice }: { tournamentId:
 
   async function saveStructure() {
     if (!draft.length) return setError('Добавьте хотя бы один уровень');
+    const normalized = draft.map((level, index) => ({
+      index,
+      kind: level.kind,
+      durationMinutes: numberOrNull(level.durationMinutes),
+      smallBlind: numberOrNull(level.smallBlind),
+      bigBlind: numberOrNull(level.bigBlind),
+      ante: numberOrNull(level.ante),
+      label: level.label.trim() || null
+    }));
+    const invalid = normalized.find((level) => level.durationMinutes == null || level.durationMinutes < 1 || (level.kind === 'LEVEL' && (level.bigBlind == null || level.bigBlind < 1)));
+    if (invalid) return setError(`Заполните обязательные числовые поля в строке ${invalid.index + 1}`);
+    const inconsistent = normalized.find((level) => level.kind === 'LEVEL' && (level.smallBlind ?? 0) > (level.bigBlind ?? 0));
+    if (inconsistent) return setError(`Малый блайнд не может превышать большой в строке ${inconsistent.index + 1}`);
+
     setBusy(true); setError(null);
     try {
       const next = await post<TournamentTimer>(`/admin/tournaments/${tournamentId}/timer/structure`, {
-        levels: draft.map((level) => ({
+        levels: normalized.map((level) => ({
           kind: level.kind,
-          durationSeconds: Math.round(level.durationMinutes * 60),
-          smallBlind: level.kind === 'LEVEL' ? level.smallBlind : null,
+          durationSeconds: Math.round((level.durationMinutes ?? 0) * 60),
+          smallBlind: level.kind === 'LEVEL' ? level.smallBlind ?? 0 : null,
           bigBlind: level.kind === 'LEVEL' ? level.bigBlind : null,
-          ante: level.kind === 'LEVEL' ? level.ante : null,
-          label: level.label.trim() || null
+          ante: level.kind === 'LEVEL' ? level.ante ?? 0 : null,
+          label: level.label
         }))
       }, 'PUT');
       setTimer(next);
@@ -111,13 +126,15 @@ export function TournamentTimerPanel({ tournamentId, onNotice }: { tournamentId:
 
   function addLevel(kind: TournamentTimerLevelKind) {
     const previous = [...draft].reverse().find((level) => level.kind === 'LEVEL');
+    const previousSmall = numberOrNull(previous?.smallBlind ?? '') ?? 25;
+    const previousBig = numberOrNull(previous?.bigBlind ?? '') ?? 50;
     setDraft((items) => [...items, kind === 'BREAK'
-      ? { key: makeKey(), kind, durationMinutes: 10, smallBlind: 0, bigBlind: 0, ante: 0, label: 'Перерыв' }
+      ? { key: makeKey(), kind, durationMinutes: '10', smallBlind: '', bigBlind: '', ante: '', label: 'Перерыв' }
       : {
-          key: makeKey(), kind, durationMinutes: 15,
-          smallBlind: previous ? previous.smallBlind * 2 : 25,
-          bigBlind: previous ? previous.bigBlind * 2 : 50,
-          ante: previous?.ante ?? 0, label: ''
+          key: makeKey(), kind, durationMinutes: '15',
+          smallBlind: String(previous ? previousSmall * 2 : 25),
+          bigBlind: String(previous ? previousBig * 2 : 50),
+          ante: previous?.ante ?? '0', label: ''
         }]);
   }
 
@@ -135,16 +152,29 @@ export function TournamentTimerPanel({ tournamentId, onNotice }: { tournamentId:
     });
   }
 
+  async function copyPublicLink() {
+    const url = `${window.location.origin}/timer/${tournamentId}`;
+    try { await navigator.clipboard.writeText(url); onNotice('Публичная ссылка таймера скопирована'); }
+    catch { setError('Не удалось скопировать ссылку. Откройте табло и скопируйте адрес из браузера.'); }
+  }
+
+  async function enterFullscreen() {
+    try { await panelRef.current?.requestFullscreen(); }
+    catch { setError('Браузер не разрешил полноэкранный режим'); }
+  }
+
   if (!timer && busy) return <Loading label="Готовим турнирный таймер…" />;
   if (!timer) return <div className="form-error">{error || 'Таймер недоступен'}<button onClick={() => void load()}>Повторить</button></div>;
 
-  return <div className="timer-admin-panel">
+  return <div ref={panelRef} className={`timer-admin-panel ${compact ? 'timer-admin-compact' : ''}`}>
     <section className={`timer-console timer-${display?.status.toLowerCase()}`}>
       <header>
         <div><span className="timer-kicker">{display?.currentLevel?.kind === 'BREAK' ? 'ПЕРЕРЫВ' : `УРОВЕНЬ ${countPlayedLevels(timer, display?.currentLevelIndex ?? 0)}`}</span><h2>{timer.tournament.title}</h2></div>
         <div className="timer-header-actions">
           <span>{timerDuration(totalSeconds)} · {timer.levels.length} этапов</span>
-          <Link className="button secondary" to={`/timer/${tournamentId}`} target="_blank"><ExternalLink size={15} />Большой экран</Link>
+          <button className="button secondary timer-copy-link" onClick={() => void copyPublicLink()}><Copy size={15} />Ссылка ТВ</button>
+          <button className="button secondary timer-fullscreen" onClick={() => void enterFullscreen()}><Maximize2 size={15} />На весь экран</button>
+          <Link className="button secondary" to={`/timer/${tournamentId}`} target="_blank"><ExternalLink size={15} />Табло</Link>
         </div>
       </header>
       <div className="timer-stage">
@@ -183,26 +213,32 @@ export function TournamentTimerPanel({ tournamentId, onNotice }: { tournamentId:
     </section>
 
     {editing && <section className="timer-structure-editor">
-      <header><div><h3>Редактор уровней</h3><p>Изменения можно сохранить даже во время игры — текущий отсчёт продолжится.</p></div><button className="icon-button" onClick={() => setEditing(false)}><X /></button></header>
+      <header><div><h3>Редактор уровней</h3><p>Пустое числовое поле остаётся пустым до сохранения. Ноль не подставляется автоматически.</p></div><button className="icon-button" onClick={() => setEditing(false)}><X /></button></header>
       <div className="timer-draft-list">{draft.map((level, index) => <article className={level.kind === 'BREAK' ? 'break' : ''} key={level.key}>
         <div className="timer-draft-order"><strong>{index + 1}</strong><button type="button" disabled={index === 0} onClick={() => move(index, -1)}><ArrowUp /></button><button type="button" disabled={index === draft.length - 1} onClick={() => move(index, 1)}><ArrowDown /></button></div>
-        <label>Тип<select value={level.kind} onChange={(event) => updateDraft(index, { kind: event.target.value as TournamentTimerLevelKind })}><option value="LEVEL">Уровень</option><option value="BREAK">Перерыв</option></select></label>
-        <label>Минут<input type="number" min="1" max="360" value={level.durationMinutes} onChange={(event) => updateDraft(index, { durationMinutes: Number(event.target.value) })} /></label>
+        <label>Тип<select value={level.kind} onChange={(event: ChangeEvent<HTMLSelectElement>) => updateDraft(index, { kind: event.target.value as TournamentTimerLevelKind })}><option value="LEVEL">Уровень</option><option value="BREAK">Перерыв</option></select></label>
+        <label>Минут<input type="number" min="1" max="360" value={level.durationMinutes} onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft(index, { durationMinutes: event.target.value })} /></label>
         {level.kind === 'LEVEL' ? <>
-          <label>Малый<input type="number" min="0" value={level.smallBlind} onChange={(event) => updateDraft(index, { smallBlind: Number(event.target.value) })} /></label>
-          <label>Большой<input type="number" min="1" value={level.bigBlind} onChange={(event) => updateDraft(index, { bigBlind: Number(event.target.value) })} /></label>
-          <label>Анте<input type="number" min="0" value={level.ante} onChange={(event) => updateDraft(index, { ante: Number(event.target.value) })} /></label>
-        </> : <label className="timer-break-label">Название<input maxLength={40} value={level.label} onChange={(event) => updateDraft(index, { label: event.target.value })} /></label>}
+          <label>Малый<input type="number" min="0" value={level.smallBlind} onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft(index, { smallBlind: event.target.value })} /></label>
+          <label>Большой<input type="number" min="1" value={level.bigBlind} onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft(index, { bigBlind: event.target.value })} /></label>
+          <label>Анте<input type="number" min="0" value={level.ante} onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft(index, { ante: event.target.value })} /></label>
+        </> : <label className="timer-break-label">Название<input maxLength={40} value={level.label} onChange={(event: ChangeEvent<HTMLInputElement>) => updateDraft(index, { label: event.target.value })} /></label>}
         <div className="timer-draft-actions"><button title="Копировать" onClick={() => setDraft((items) => [...items.slice(0, index + 1), { ...level, key: makeKey() }, ...items.slice(index + 1)])}><Copy /></button><button className="danger" title="Удалить" disabled={draft.length === 1} onClick={() => setDraft((items) => items.filter((_, itemIndex) => itemIndex !== index))}><Trash2 /></button></div>
       </article>)}</div>
       <div className="timer-editor-footer">
         <div><button className="button secondary" onClick={() => addLevel('LEVEL')}><Plus />Уровень</button><button className="button secondary" onClick={() => addLevel('BREAK')}><Plus />Перерыв</button></div>
-        <span>Общее время: <b>{timerDuration(draft.reduce((sum, level) => sum + level.durationMinutes * 60, 0))}</b></span>
+        <span>Общее время: <b>{timerDuration(draft.reduce((sum, level) => sum + (numberOrNull(level.durationMinutes) ?? 0) * 60, 0))}</b></span>
         <button className="button primary" disabled={busy} onClick={() => void saveStructure()}><Save />{busy ? 'Сохраняем…' : 'Сохранить структуру'}</button>
       </div>
       {error && <div className="form-error">{error}</div>}
     </section>}
   </div>;
+}
+
+function numberOrNull(value: string) {
+  if (value.trim() === '') return null;
+  const result = Number(value);
+  return Number.isFinite(result) ? result : null;
 }
 
 function countPlayedLevels(timer: TournamentTimer, throughIndex: number) {

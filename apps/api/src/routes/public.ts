@@ -43,8 +43,9 @@ publicRouter.get('/users/:id/avatar', async (req, res) => {
   return res.send(image);
 });
 
-publicRouter.use(requireAuth);
+// Телевизионное табло не содержит персональных данных и доступно по прямой ссылке.
 publicRouter.use('/tournaments', timerPublicRouter);
+publicRouter.use(requireAuth);
 
 const userSelect = { id: true, firstName: true, lastName: true, username: true, nickname: true, photoUrl: true, points: true } as const;
 

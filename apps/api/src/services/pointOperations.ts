@@ -76,6 +76,12 @@ export async function applyBulkPointChanges(input: BulkPointInput) {
         },
         include: { user: { select: { id: true, telegramId: true, firstName: true, lastName: true, username: true, points: true } } }
       });
+      if (input.tournamentId) {
+        await tx.tournamentResult.update({
+          where: { tournamentId_userId: { tournamentId: input.tournamentId, userId: user.id } },
+          data: { points: entry.amount }
+        });
+      }
       transactions.push(transaction);
     }
 
@@ -117,7 +123,12 @@ export async function reversePointTransaction(input: ReversePointInput) {
 
     const original = await tx.pointTransaction.findUnique({
       where: { id: input.transactionId },
-      include: { reversedBy: true, user: { select: { id: true, points: true, firstName: true, telegramId: true } }, season: true }
+      include: {
+        reversedBy: true,
+        user: { select: { id: true, points: true, firstName: true, telegramId: true } },
+        season: true,
+        batch: { select: { tournamentId: true } }
+      }
     });
     if (!original) throw new AppError('Операция не найдена', 404, 'TRANSACTION_NOT_FOUND');
     if (original.reversalOfId) throw new AppError('Нельзя отменить компенсирующую операцию', 409, 'REVERSAL_OF_REVERSAL');
@@ -147,6 +158,13 @@ export async function reversePointTransaction(input: ReversePointInput) {
       },
       include: { user: { select: { id: true, telegramId: true, firstName: true, lastName: true, username: true, points: true } } }
     });
+    if (original.batch?.tournamentId) {
+      await tx.tournamentResult.update({
+        where: { tournamentId_userId: { tournamentId: original.batch.tournamentId, userId: original.userId } },
+        data: { points: { increment: amount } }
+      });
+    }
+
     await writeAudit(tx, {
       actorId: input.adminId,
       action: 'POINTS_REVERSED',

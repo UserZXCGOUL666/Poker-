@@ -33,6 +33,14 @@ enum TournamentRegistrationStatus {
   CANCELLED
 }
 
+enum TournamentPlayerActionType {
+  REBUY
+  REENTRY
+  ELIMINATION
+  BOUNTY
+  BONUS_XP
+}
+
 enum ReasonPresetKind {
   AWARD
   DEDUCTION
@@ -119,6 +127,9 @@ model User {
   referralReceived      Referral?                @relation("ReferralInvitee")
   dailyHandAttempts     DailyHandAttempt[]
   analyticsEvents       AnalyticsEvent[]
+  tournamentActions     TournamentPlayerAction[] @relation("TournamentActionPlayer")
+  tournamentActionTargets TournamentPlayerAction[] @relation("TournamentActionTarget")
+  tournamentActionsCreated TournamentPlayerAction[] @relation("TournamentActionAdmin")
 
   @@index([points, createdAt])
   @@index([clubXp, createdAt])
@@ -209,6 +220,7 @@ model Tournament {
   tables               TournamentTable[]
   seats                TournamentSeat[]
   timer                 TournamentTimer?
+  playerActions         TournamentPlayerAction[]
 
   @@unique([templateId, startsAt])
   @@index([seasonId, startsAt])
@@ -330,6 +342,26 @@ model TournamentRegistration {
   @@unique([tournamentId, userId])
   @@index([tournamentId, status, createdAt])
   @@index([userId, createdAt])
+}
+
+model TournamentPlayerAction {
+  id           String                     @id @default(cuid())
+  tournamentId String
+  userId       String
+  targetUserId String?
+  createdById  String
+  type         TournamentPlayerActionType
+  value        Int                        @default(1)
+  note         String?
+  createdAt    DateTime                   @default(now())
+  tournament   Tournament                 @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  user         User                       @relation("TournamentActionPlayer", fields: [userId], references: [id], onDelete: Cascade)
+  targetUser   User?                      @relation("TournamentActionTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+  createdBy    User                       @relation("TournamentActionAdmin", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([tournamentId, createdAt])
+  @@index([tournamentId, userId, type, createdAt])
+  @@index([targetUserId, createdAt])
 }
 
 model TournamentTemplate {

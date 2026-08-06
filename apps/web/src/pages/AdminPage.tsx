@@ -3,7 +3,7 @@ import {
   Armchair, CircleAlert, ClipboardCheck, Coins, Copy, Edit3, Eye, EyeOff, FileStack, Filter, Gift, History, ImagePlus, KeyRound, LayoutDashboard,
   ListChecks, LogOut, Medal, MonitorSmartphone, NotebookPen, Plus, RefreshCw, RotateCcw, Save,
   Search, Settings, ShieldCheck, ShieldOff, Shuffle, Spade, Tags, Trash2, Trophy, UserCheck, UserMinus, UserRound, Play,
-  Users, X, MoreHorizontal, Phone, BarChart3, Clock3
+  Users, X, MoreHorizontal, Phone, BarChart3
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
@@ -17,7 +17,7 @@ import { applyAccentColor, DEFAULT_ACCENT_COLOR, normalizeAccentColor } from '..
 import type { PlayerTag, PointTransaction, Season, Tournament, TournamentRegistrationStatus, User } from '../types';
 import { LoyaltyAdminTab } from './LoyaltyAdminTab';
 import { AnalyticsAdminTab } from './AnalyticsAdminTab';
-import { TournamentTimerPanel } from '../components/TournamentTimerPanel';
+import { MainTournamentWorkspace } from '../components/MainTournamentWorkspace';
 
 type AdminSection = 'overview' | 'players' | 'tournaments' | 'seating' | 'loyalty' | 'analytics' | 'audit' | 'access' | 'settings' | 'more';
 type AdminIntentKind = 'points' | 'newTournament' | 'results' | 'participants' | 'invite' | 'openTournament' | 'seating';
@@ -27,7 +27,10 @@ const adminSectionValues: AdminSection[] = ['overview', 'players', 'tournaments'
 const adminIntentValues: AdminIntentKind[] = ['points', 'newTournament', 'results', 'participants', 'invite', 'openTournament', 'seating'];
 
 function initialAdminSection(): AdminSection {
-  const value = new URLSearchParams(window.location.search).get('section') as AdminSection | null;
+  const params = new URLSearchParams(window.location.search);
+  const value = params.get('section') as AdminSection | null;
+  const intent = params.get('intent') as AdminIntentKind | null;
+  if (value === 'seating' || intent === 'seating' || intent === 'participants' || intent === 'results') return 'overview';
   return value && adminSectionValues.includes(value) ? value : 'overview';
 }
 
@@ -47,7 +50,7 @@ function replaceAdminLocation(section: AdminSection, kind?: AdminIntentKind, tar
   if (targetId) url.searchParams.set('target', targetId);
   window.history.replaceState({}, '', `${url.pathname}${url.search}`);
 }
-type AdminUser = Pick<User, 'id' | 'telegramId' | 'firstName' | 'lastName' | 'username' | 'nickname' | 'role' | 'points'> & {
+type AdminUser = Pick<User, 'id' | 'telegramId' | 'firstName' | 'lastName' | 'username' | 'nickname' | 'photoUrl' | 'role' | 'points' | 'clubXp'> & {
   phoneNumber: string | null;
   phoneSharedAt: string | null;
   tags: PlayerTag[];
@@ -107,30 +110,29 @@ type SeatingData = {
 type BrandingSettings = { ratingBannerImageData: string | null; accentColor: string; updatedAt: string | null };
 
 const desktopSections = [
-  { id: 'overview' as const, label: 'Сегодня', icon: LayoutDashboard },
+  { id: 'overview' as const, label: 'MAIN', icon: LayoutDashboard },
   { id: 'players' as const, label: 'Игроки', icon: Users },
   { id: 'tournaments' as const, label: 'Турниры', icon: CalendarDays },
-  { id: 'seating' as const, label: 'Рассадка', icon: Armchair },
-  { id: 'loyalty' as const, label: 'Лояльность', icon: Gift },
   { id: 'analytics' as const, label: 'Аналитика', icon: BarChart3 },
   { id: 'audit' as const, label: 'Аудит', icon: History },
-  { id: 'access' as const, label: 'Доступ', icon: KeyRound },
-  { id: 'settings' as const, label: 'Настройки', icon: Settings }
+  { id: 'settings' as const, label: 'Настройки', icon: Settings },
+  { id: 'more' as const, label: 'Ещё', icon: MoreHorizontal }
 ];
 const mobileSections = [
-  { id: 'overview' as const, label: 'Сегодня', icon: LayoutDashboard },
+  { id: 'overview' as const, label: 'MAIN', icon: LayoutDashboard },
   { id: 'players' as const, label: 'Игроки', icon: Users },
   { id: 'tournaments' as const, label: 'Турниры', icon: CalendarDays },
   { id: 'more' as const, label: 'Ещё', icon: MoreHorizontal }
 ];
 const sectionTitles: Record<AdminSection, string> = {
-  overview: 'Сегодня', players: 'Игроки', tournaments: 'Турниры', seating: 'Рассадка', loyalty: 'Лояльность', analytics: 'Аналитика', audit: 'Аудит', access: 'Безопасность', settings: 'Настройки', more: 'Ещё'
+  overview: 'MAIN', players: 'Игроки', tournaments: 'Турниры', seating: 'Рассадка', loyalty: 'Лояльность', analytics: 'Аналитика', audit: 'Аудит', access: 'Безопасность', settings: 'Настройки', more: 'Ещё'
 };
 
 export function AdminPage() {
   const { user } = useAuth();
   const [section, setSection] = useState<AdminSection>(initialAdminSection);
   const [intent, setIntent] = useState<AdminIntent>(initialAdminIntent);
+  const [mainTournamentId, setMainTournamentId] = useState(() => new URLSearchParams(window.location.search).get('target') ?? '');
   const [overview, setOverview] = useState<Overview | null>(null);
   const [seasons, setSeasons] = useState<Season[]>([]);
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
@@ -157,8 +159,8 @@ export function AdminPage() {
         const [usersData, tagsData, reasonsData] = await Promise.all([api<AdminUser[]>('/admin/users'), api<PlayerTag[]>('/admin/tags'), api<ReasonPreset[]>('/admin/reason-presets')]);
         setUsers(usersData); setTags(tagsData); setReasonPresets(reasonsData);
       } else if (target === 'tournaments') {
-        const [seasonsData, tournamentsData, usersData, templatesData] = await Promise.all([api<Season[]>('/admin/seasons'), api<Tournament[]>('/tournaments'), api<AdminUser[]>('/admin/users'), api<TournamentTemplate[]>('/admin/tournament-templates')]);
-        setSeasons(seasonsData); setTournaments(tournamentsData); setUsers(usersData); setTemplates(templatesData);
+        const [seasonsData, tournamentsData, templatesData] = await Promise.all([api<Season[]>('/admin/seasons'), api<Tournament[]>('/tournaments'), api<TournamentTemplate[]>('/admin/tournament-templates')]);
+        setSeasons(seasonsData); setTournaments(tournamentsData); setTemplates(templatesData);
       } else if (target === 'seating') {
         setTournaments(await api<Tournament[]>('/tournaments'));
       } else if (target === 'access') {
@@ -181,6 +183,13 @@ export function AdminPage() {
   }, [section, loadedSections, loadSectionData]);
 
   function navigate(next: AdminSection, kind?: AdminIntentKind, targetId?: string) {
+    if (next === 'seating' || kind === 'seating' || kind === 'participants' || kind === 'results') {
+      if (targetId) setMainTournamentId(targetId);
+      setSection('overview');
+      setIntent(null);
+      replaceAdminLocation('overview');
+      return;
+    }
     setSection(next);
     setIntent(kind ? { kind, targetId, nonce: Date.now() } : null);
     replaceAdminLocation(next, kind, targetId);
@@ -207,10 +216,10 @@ export function AdminPage() {
     <main className="admin-main">
       <header className="admin-mobile-head"><Link to="/"><ArrowLeft /></Link><strong>{sectionTitles[section]}</strong><Link to="/profile" aria-label="Открыть профиль"><Avatar firstName={user!.firstName} lastName={user!.lastName} photoUrl={user!.photoUrl} size="sm" /></Link></header>
       {notice && <div className="toast"><CheckCircle2 size={18} />{notice}</div>}
-      {section === 'overview' && <OverviewTab data={overview} onNavigate={navigate} onDone={done} />}
+      {section === 'overview' && <MainTournamentWorkspace initialTournamentId={mainTournamentId || overview.focusTournament?.id} onNotice={done} onOpenTournament={(id) => navigate('tournaments', 'openTournament', id)} />}
       {!sectionReady && <div className="admin-view"><Loading label="Загружаем раздел…" /></div>}
       {section === 'players' && sectionReady && <PlayersTab users={users} tags={tags} reasonPresets={reasonPresets} intent={intent} onDone={done} />}
-      {section === 'tournaments' && sectionReady && <TournamentsTab seasons={seasons} tournaments={tournaments} users={users} templates={templates} intent={intent} onDone={done} />}
+      {section === 'tournaments' && sectionReady && <TournamentsTab seasons={seasons} tournaments={tournaments} templates={templates} intent={intent} onDone={done} onOpenMain={(id) => { setMainTournamentId(id); navigate('overview'); }} />}
       {section === 'seating' && sectionReady && <SeatingTab tournaments={tournaments} intent={intent} onDone={done} />}
       {section === 'loyalty' && <LoyaltyAdminTab onDone={done} />}
       {section === 'analytics' && <AnalyticsAdminTab />}
@@ -537,16 +546,14 @@ function PlayersTab({ users, tags, reasonPresets, intent, onDone }: { users: Adm
   </div>;
 }
 
-function TournamentsTab({ seasons, tournaments, users, templates, intent, onDone }: { seasons: Season[]; tournaments: Tournament[]; users: AdminUser[]; templates: TournamentTemplate[]; intent: AdminIntent; onDone: (message: string) => void }) {
+function TournamentsTab({ seasons, tournaments, templates, intent, onDone, onOpenMain }: { seasons: Season[]; tournaments: Tournament[]; templates: TournamentTemplate[]; intent: AdminIntent; onDone: (message: string) => void; onOpenMain: (id: string) => void }) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<'ALL' | Tournament['status']>('ALL');
   const [selectedId, setSelectedId] = useState(tournaments.find((item) => item.status === 'UPCOMING')?.id ?? tournaments[0]?.id ?? '');
   const [detail, setDetail] = useState<TournamentDetails | null>(null);
-  const [view, setView] = useState<'details' | 'timer' | 'participants' | 'results'>('details');
   const [createOpen, setCreateOpen] = useState(false);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [templateDefault, setTemplateDefault] = useState<TournamentTemplate | null>(null);
-  const [registrationUserId, setRegistrationUserId] = useState('');
   const [saving, setSaving] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
@@ -569,9 +576,8 @@ function TournamentsTab({ seasons, tournaments, users, templates, intent, onDone
   useEffect(() => { setFormError(null); void loadDetail(selectedId, true); }, [selectedId, loadDetail]);
   useEffect(() => {
     if (intent?.kind === 'newTournament') { setFormError(null); setCreateOpen(true); }
-    if (intent?.kind === 'results') { if (intent.targetId) setSelectedId(intent.targetId); setView('results'); }
-    if (intent?.kind === 'participants') { if (intent.targetId) setSelectedId(intent.targetId); setView('participants'); }
-    if (intent?.kind === 'openTournament' && intent.targetId) { setSelectedId(intent.targetId); setView('details'); }
+    if ((intent?.kind === 'results' || intent?.kind === 'participants' || intent?.kind === 'seating') && intent.targetId) onOpenMain(intent.targetId);
+    if (intent?.kind === 'openTournament' && intent.targetId) setSelectedId(intent.targetId);
   }, [intent?.nonce, intent?.kind, intent?.targetId]);
 
   const filtered = tournaments.filter((item) => (filter === 'ALL' || item.status === filter) && `${item.title} ${item.location ?? ''}`.toLowerCase().includes(query.toLowerCase()));
@@ -609,22 +615,8 @@ function TournamentsTab({ seasons, tournaments, users, templates, intent, onDone
     catch (cause) { setFormError(cause instanceof Error ? cause.message : 'Не удалось отправить уведомление'); }
     finally { setSaving(false); }
   }
-  async function addRegistration() {
-    if (!detail || !registrationUserId) return;
-    setSaving(true); setFormError(null);
-    try { await post(`/admin/tournaments/${detail.id}/registrations`, { userId: registrationUserId }); setRegistrationUserId(''); await loadDetail(detail.id); onDone('Участник добавлен'); }
-    catch (cause) { setFormError(cause instanceof Error ? cause.message : 'Не удалось добавить участника'); }
-    finally { setSaving(false); }
-  }
-  async function setRegistrationStatus(registrationId: string, status: TournamentRegistrationStatus) {
-    setSaving(true); setFormError(null);
-    try { await post(`/admin/registrations/${registrationId}`, { status }, 'PATCH'); if (detail) await loadDetail(detail.id); onDone(status === 'CANCELLED' ? 'Запись отменена, очередь обновлена' : 'Статус участника обновлён'); }
-    catch (cause) { setFormError(cause instanceof Error ? cause.message : 'Не удалось обновить участника'); }
-    finally { setSaving(false); }
-  }
-
   return <div className="admin-view">
-    <AdminHeading eyebrow="ИГРОВОЙ КАЛЕНДАРЬ" title="Турниры" text="Расписание, заявки, результаты и пакетное начисление в одном месте" actions={<><button className="button secondary" onClick={() => setTemplatesOpen(true)}><FileStack size={17} />Шаблоны</button><button className="button primary" onClick={() => { setTemplateDefault(null); setFormError(null); setCreateOpen(true); }}><Plus size={17} />Новый турнир</button></>} />
+    <AdminHeading eyebrow="ИГРОВОЙ КАЛЕНДАРЬ" title="Турниры" text="Создание, настройки, шаблоны и архив. Проведение текущей игры вынесено в MAIN." actions={<><button className="button secondary" onClick={() => setTemplatesOpen(true)}><FileStack size={17} />Шаблоны</button><button className="button primary" onClick={() => { setTemplateDefault(null); setFormError(null); setCreateOpen(true); }}><Plus size={17} />Новый турнир</button></>} />
     <div className="tournament-workspace">
       <aside className="tournament-panel">
         <div className="players-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Название или место" /></div>
@@ -632,9 +624,9 @@ function TournamentsTab({ seasons, tournaments, users, templates, intent, onDone
         <div className="tournament-list">{filtered.map((item) => <button key={item.id} className={selectedId === item.id ? 'active' : ''} onClick={() => setSelectedId(item.id)}><div className="mini-date"><strong>{tournamentDate(item.startsAt).day}</strong><span>{tournamentDate(item.startsAt).month}</span></div><div><strong>{item.title}</strong><small>{tournamentDate(item.startsAt).time} · {item.location || 'Без места'}</small></div><Status value={item.status} /></button>)}{!filtered.length && <Empty icon={<Search />} title="Турниры не найдены" text="Измените поиск или фильтр" />}</div>
       </aside>
       <section className="tournament-detail">{formError && !detail && !loadingDetail && <div className="form-error">{formError}</div>}{loadingDetail && !detail ? <Loading label="Открываем турнир…" /> : detail ? <>
-        <header className="tournament-detail-head"><div><Status value={detail.status} /><h2>{detail.title}</h2><p>{tournamentDate(detail.startsAt).full} · {detail.location || 'Место не указано'}</p></div><div><button className="button secondary" disabled={saving || detail.status !== 'UPCOMING'} onClick={() => void notify()}><Bell size={16} />Уведомить</button><button className="icon-button delete-tournament" title="Удалить турнир" onClick={() => void removeTournament()}><Trash2 size={16} /></button></div></header>
-        <div className="player-detail-tabs tournament-tabs"><button className={view === 'details' ? 'active' : ''} onClick={() => setView('details')}><Edit3 />Информация</button><button className={view === 'timer' ? 'active' : ''} onClick={() => setView('timer')}><Clock3 />Таймер</button><button className={view === 'participants' ? 'active' : ''} onClick={() => setView('participants')}><UserCheck />Участники <span>{detail.registrations.filter((item) => item.status !== 'CANCELLED').length}</span></button><button className={view === 'results' ? 'active' : ''} onClick={() => setView('results')}><Medal />Результаты <span>{detail.results.length}</span></button></div>
-        {view === 'details' && <form key={detail.id} className="admin-form tournament-edit-form" onSubmit={updateTournament}>
+        <header className="tournament-detail-head"><div><Status value={detail.status} /><h2>{detail.title}</h2><p>{tournamentDate(detail.startsAt).full} · {detail.location || 'Место не указано'}</p></div><div><button className="button primary" onClick={() => onOpenMain(detail.id)}><LayoutDashboard size={16} />Открыть в MAIN</button><button className="button secondary" disabled={saving || detail.status !== 'UPCOMING'} onClick={() => void notify()}><Bell size={16} />Уведомить</button><button className="icon-button delete-tournament" title="Удалить турнир" onClick={() => void removeTournament()}><Trash2 size={16} /></button></div></header>
+        <div className="tournament-main-handoff"><LayoutDashboard /><div><strong>Операционная работа находится в MAIN</strong><p>Чек-ин, рассадка, карточки игроков, ребаи, выбывания, результаты, PTS и таймер доступны в едином рабочем пространстве.</p></div><button className="button secondary" onClick={() => onOpenMain(detail.id)}>Перейти</button></div>
+        <form key={detail.id} className="admin-form tournament-edit-form" onSubmit={updateTournament}>
           <label>Название<input name="title" required minLength={2} defaultValue={detail.title} /></label>
           <div className="form-row"><label>Сезон<select name="seasonId" required defaultValue={detail.seasonId}>{seasons.map((season) => <option value={season.id} key={season.id}>{season.name}</option>)}</select></label><label>Дата и время<input name="startsAt" type="datetime-local" required defaultValue={dateTimeInput(detail.startsAt)} /></label></div>
           <div className="form-row"><label>Место<input name="location" defaultValue={detail.location ?? ''} /></label><label>Статус<select name="status" defaultValue={detail.status}><option value="UPCOMING">Скоро</option><option value="ACTIVE">Идёт</option><option value="FINISHED">Завершён</option><option value="CANCELLED">Отменён</option></select></label></div>
@@ -644,10 +636,7 @@ function TournamentsTab({ seasons, tournaments, users, templates, intent, onDone
           <label>Описание<textarea name="description" rows={4} defaultValue={detail.description ?? ''} /></label>
           {formError && <div className="form-error">{formError}</div>}
           <button className="button primary wide" disabled={saving}><Save size={17} />{saving ? 'Сохраняем…' : 'Сохранить изменения'}</button>
-        </form>}
-        {view === 'timer' && <TournamentTimerPanel tournamentId={detail.id} onNotice={onDone} />}
-        {view === 'participants' && <ParticipantsEditor details={detail} users={users} selectedId={registrationUserId} setSelectedId={setRegistrationUserId} saving={saving} error={formError} onAdd={addRegistration} onStatus={setRegistrationStatus} />}
-        {view === 'results' && <ResultsEditor key={detail.id} details={detail} users={users} onDone={onDone} onSaved={async () => { await loadDetail(detail.id); }} />}
+        </form>
       </> : <Empty icon={<CalendarDays />} title="Выберите турнир" text="Информация откроется справа" />}</section>
     </div>
     {createOpen && <Modal title="Новый турнир" onClose={() => { setCreateOpen(false); setTemplateDefault(null); setFormError(null); }}><form key={templateDefault?.id ?? 'blank'} className="admin-form" onSubmit={createTournament}>
@@ -1155,7 +1144,7 @@ function AuditJson({ title, value }: { title: string; value: unknown }) {
 }
 
 function MoreTab({ onNavigate }: { onNavigate: (section: AdminSection) => void }) {
-  return <div className="admin-view more-view"><AdminHeading eyebrow="УПРАВЛЕНИЕ" title="Ещё" text="Аналитика, лояльность, рассадка, аудит, безопасность и параметры клуба" /><div className="more-menu-grid"><button onClick={() => onNavigate('analytics')}><span><BarChart3 /></span><div><strong>Аналитика клуба</strong><small>Явка, рост, активность и эффективность</small></div><ChevronRight /></button><button onClick={() => onNavigate('loyalty')}><span><Gift /></span><div><strong>Программа лояльности</strong><small>Club XP, советы, раздачи и рефералы</small></div><ChevronRight /></button><button onClick={() => onNavigate('seating')}><span><Armchair /></span><div><strong>Рассадка игроков</strong><small>Столы, места и публикация</small></div><ChevronRight /></button><button onClick={() => onNavigate('audit')}><span><History /></span><div><strong>Аудит действий</strong><small>Полная история изменений</small></div><ChevronRight /></button><button onClick={() => onNavigate('access')}><span><KeyRound /></span><div><strong>Доступ из браузера</strong><small>Приглашения и активные сессии</small></div><ChevronRight /></button><button onClick={() => onNavigate('settings')}><span><Settings /></span><div><strong>Настройки</strong><small>Сезоны, оформление, причины и теги</small></div><ChevronRight /></button><Link to="/"><span><LogOut /></span><div><strong>Вернуться в приложение</strong><small>Закрыть панель управления</small></div><ChevronRight /></Link></div></div>;
+  return <div className="admin-view more-view"><AdminHeading eyebrow="УПРАВЛЕНИЕ" title="Ещё" text="Лояльность, безопасность и дополнительные параметры клуба" /><div className="more-menu-grid"><button onClick={() => onNavigate('analytics')}><span><BarChart3 /></span><div><strong>Аналитика клуба</strong><small>Явка, рост, активность и эффективность</small></div><ChevronRight /></button><button onClick={() => onNavigate('loyalty')}><span><Gift /></span><div><strong>Программа лояльности</strong><small>Club XP, советы, раздачи и рефералы</small></div><ChevronRight /></button><button onClick={() => onNavigate('audit')}><span><History /></span><div><strong>Аудит действий</strong><small>Полная история изменений</small></div><ChevronRight /></button><button onClick={() => onNavigate('access')}><span><KeyRound /></span><div><strong>Доступ из браузера</strong><small>Приглашения и активные сессии</small></div><ChevronRight /></button><button onClick={() => onNavigate('settings')}><span><Settings /></span><div><strong>Настройки</strong><small>Сезоны, оформление, причины и теги</small></div><ChevronRight /></button><Link to="/"><span><LogOut /></span><div><strong>Вернуться в приложение</strong><small>Закрыть панель управления</small></div><ChevronRight /></Link></div></div>;
 }
 
 function InviteResult({ invite, onCopied }: { invite: BrowserInviteResult; onCopied: (message: string) => void }) {
@@ -1236,7 +1225,7 @@ function isSessionActive(session: BrowserSession) { return !session.revokedAt &&
 function registrationStatusLabel(value: TournamentRegistrationStatus) { return { REGISTERED: 'В основном списке', WAITLISTED: 'Лист ожидания', CHECKED_IN: 'Присутствие подтверждено', PLAYED: 'Сыграл', CANCELLED: 'Отменено' }[value]; }
 function auditActionLabel(value: string) {
   if (value === 'BROADCAST_SENT') return 'Рассылка';
-  const labels: Record<string, string> = { POINTS_AWARDED: 'Начисление очков', POINTS_DEDUCTED: 'Списание очков', POINTS_BATCH_CREATED: 'Пакет очков', POINTS_REVERSED: 'Отмена операции', TOURNAMENT_CREATED: 'Создание турнира', TOURNAMENT_UPDATED: 'Изменение турнира', TOURNAMENT_DELETED: 'Удаление турнира', TOURNAMENT_RESULTS_UPDATED: 'Результаты', REGISTRATION_CREATED: 'Регистрация', WAITLIST_JOINED: 'Лист ожидания', REGISTRATION_STATUS_CHANGED: 'Статус заявки', REGISTRATION_CANCELLED: 'Отмена заявки', WAITLIST_PROMOTED: 'Перевод из очереди', SEASON_CREATED: 'Создание сезона', SEASON_UPDATED: 'Изменение сезона', SEASON_FINALIZED: 'Финализация сезона', USER_NOTE_UPDATED: 'Заметка', USER_TAG_ADDED: 'Добавление тега', USER_TAG_REMOVED: 'Удаление тега', PHONE_SHARED: 'Передача телефона', TAG_CREATED: 'Создание тега', TAG_UPDATED: 'Изменение тега', TAG_DELETED: 'Удаление тега', BROWSER_INVITE_CREATED: 'Браузерное приглашение', BROWSER_CODE_USED: 'Вход по Telegram-коду', BROWSER_SESSION_REVOKED: 'Отзыв доступа', TOURNAMENT_NOTIFICATION_SENT: 'Уведомление', TOURNAMENT_TEMPLATE_CREATED: 'Создание шаблона', TOURNAMENT_TEMPLATE_UPDATED: 'Изменение шаблона', TOURNAMENT_TEMPLATE_DELETED: 'Удаление шаблона', RECURRING_TOURNAMENT_CREATED: 'Турнир по расписанию', REASON_PRESET_CREATED: 'Создание причины', REASON_PRESET_UPDATED: 'Изменение причины', SEATING_GENERATED: 'Создание рассадки', SEATING_REGENERATED: 'Пересоздание рассадки', PLAYER_SEATED: 'Посадка игрока', PLAYER_MOVED: 'Пересадка игрока', SEATS_SWAPPED: 'Обмен местами', PLAYER_UNSEATED: 'Снятие с места', SEATING_PUBLISHED: 'Публикация рассадки', SEATING_UNPUBLISHED: 'Скрытие рассадки', RATING_BANNER_UPDATED: 'Фон рейтинга', RATING_BANNER_REMOVED: 'Удаление фона рейтинга', INTERFACE_COLOR_UPDATED: 'Цвет интерфейса' };
+  const labels: Record<string, string> = { POINTS_AWARDED: 'Начисление очков', POINTS_DEDUCTED: 'Списание очков', POINTS_BATCH_CREATED: 'Пакет очков', POINTS_REVERSED: 'Отмена операции', TOURNAMENT_CREATED: 'Создание турнира', TOURNAMENT_UPDATED: 'Изменение турнира', TOURNAMENT_DELETED: 'Удаление турнира', TOURNAMENT_RESULTS_UPDATED: 'Результаты', REGISTRATION_CREATED: 'Регистрация', WAITLIST_JOINED: 'Лист ожидания', REGISTRATION_STATUS_CHANGED: 'Статус заявки', REGISTRATION_CANCELLED: 'Отмена заявки', WAITLIST_PROMOTED: 'Перевод из очереди', SEASON_CREATED: 'Создание сезона', SEASON_UPDATED: 'Изменение сезона', SEASON_FINALIZED: 'Финализация сезона', USER_NOTE_UPDATED: 'Заметка', USER_TAG_ADDED: 'Добавление тега', USER_TAG_REMOVED: 'Удаление тега', PHONE_SHARED: 'Передача телефона', TAG_CREATED: 'Создание тега', TAG_UPDATED: 'Изменение тега', TAG_DELETED: 'Удаление тега', BROWSER_INVITE_CREATED: 'Браузерное приглашение', BROWSER_CODE_USED: 'Вход по Telegram-коду', BROWSER_SESSION_REVOKED: 'Отзыв доступа', TOURNAMENT_NOTIFICATION_SENT: 'Уведомление', TOURNAMENT_TEMPLATE_CREATED: 'Создание шаблона', TOURNAMENT_TEMPLATE_UPDATED: 'Изменение шаблона', TOURNAMENT_TEMPLATE_DELETED: 'Удаление шаблона', RECURRING_TOURNAMENT_CREATED: 'Турнир по расписанию', REASON_PRESET_CREATED: 'Создание причины', REASON_PRESET_UPDATED: 'Изменение причины', SEATING_GENERATED: 'Создание рассадки', SEATING_REGENERATED: 'Пересоздание рассадки', PLAYER_SEATED: 'Посадка игрока', PLAYER_MOVED: 'Пересадка игрока', SEATS_SWAPPED: 'Обмен местами', PLAYER_UNSEATED: 'Снятие с места', SEATING_PUBLISHED: 'Публикация рассадки', SEATING_UNPUBLISHED: 'Скрытие рассадки', RATING_BANNER_UPDATED: 'Фон рейтинга', RATING_BANNER_REMOVED: 'Удаление фона рейтинга', INTERFACE_COLOR_UPDATED: 'Цвет интерфейса', TOURNAMENT_REBUY: 'Ребай', TOURNAMENT_REENTRY: 'Повторный вход', TOURNAMENT_ELIMINATION: 'Выбывание', TOURNAMENT_BOUNTY: 'Баунти', TOURNAMENT_BONUS_XP: 'Бонус Club XP', TOURNAMENT_TABLE_CREATED: 'Создание стола', TOURNAMENT_TABLE_UPDATED: 'Количество мест', TOURNAMENT_TABLE_CLOSED: 'Закрытие стола', TOURNAMENT_TIMER_CREATED: 'Создание таймера', TOURNAMENT_TIMER_STRUCTURE_UPDATED: 'Структура таймера', TOURNAMENT_TIMER_START: 'Запуск таймера', TOURNAMENT_TIMER_PAUSE: 'Пауза таймера', TOURNAMENT_TIMER_RESUME: 'Продолжение таймера', TOURNAMENT_TIMER_NEXT: 'Следующий уровень', TOURNAMENT_TIMER_PREVIOUS: 'Предыдущий уровень', TOURNAMENT_TIMER_RESET: 'Сброс таймера', TOURNAMENT_TIMER_FINISH: 'Завершение таймера', TOURNAMENT_TIMER_GOTO: 'Переход к уровню', TOURNAMENT_TIMER_ADD_TIME: 'Добавление времени', TOURNAMENT_TIMER_SET_REMAINING: 'Остаток времени' };
   return labels[value] ?? value.split('_').join(' ').toLowerCase();
 }
-function auditEntityLabel(value: string) { if (value === 'TelegramBroadcast') return 'Рассылки'; return ({ User: 'Игроки', Tournament: 'Турниры', TournamentSeating: 'Рассадка', ClubSettings: 'Оформление', Season: 'Сезоны', PointTransaction: 'Очки', PointBatch: 'Пакеты очков', TournamentRegistration: 'Регистрации', TournamentTemplate: 'Шаблоны турниров', PlayerTag: 'Теги', BrowserSession: 'Доступ', BrowserInvite: 'Приглашения' } as Record<string, string>)[value] ?? value; }
+function auditEntityLabel(value: string) { if (value === 'TelegramBroadcast') return 'Рассылки'; return ({ User: 'Игроки', Tournament: 'Турниры', TournamentSeating: 'Рассадка', ClubSettings: 'Оформление', Season: 'Сезоны', PointTransaction: 'Очки', PointBatch: 'Пакеты очков', TournamentRegistration: 'Регистрации', TournamentTemplate: 'Шаблоны турниров', PlayerTag: 'Теги', BrowserSession: 'Доступ', BrowserInvite: 'Приглашения', TournamentPlayerAction: 'Операции турнира', TournamentTimer: 'Таймер турнира' } as Record<string, string>)[value] ?? value; }
