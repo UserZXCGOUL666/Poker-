@@ -117,7 +117,7 @@ export function GamesPage() {
               const registrationAvailable = (game.status === 'UPCOMING' || game.status === 'ACTIVE') && visualState !== 'finished' && !game.registrationClosed && (!game.registrationDeadline || new Date(game.registrationDeadline) > now);
               const isRegistered = Boolean(game.registration && game.registration.status !== 'CANCELLED');
               const canCancel = game.status === 'UPCOMING' && (game.registration?.status === 'REGISTERED' || game.registration?.status === 'WAITLISTED');
-              const registrationLabel = game.registration?.status === 'WAITLISTED' ? 'В листе ожидания' : game.registration?.status === 'CHECKED_IN' || game.registration?.status === 'PLAYED' ? 'Чек-ин подтверждён' : isRegistered ? 'Вы записаны' : !registrationAvailable ? 'Запись закрыта' : game.participantCount >= game.capacity ? 'В лист ожидания' : 'Записаться';
+              const registrationLabel = game.registration?.status === 'WAITLISTED' ? 'Вы в листе ожидания' : game.registration?.status === 'CHECKED_IN' || game.registration?.status === 'PLAYED' ? 'Чек-ин подтверждён' : isRegistered ? 'Вы записаны' : !registrationAvailable ? 'Регистрация закрыта' : game.participantCount >= game.capacity ? 'Встать в лист ожидания' : 'Записаться на турнир';
               return <article id={`tournament-${game.id}`} className={`diary-tournament diary-${visualState} ${focusedTournamentId === game.id ? 'game-card-focused' : ''}`} key={game.id}>
                 <div className="diary-tournament-main">
                   <div className="diary-title-row"><h2>{game.title}</h2><span className={`diary-status diary-status-${visualState}`}>{visualState === 'finished' && <Check />}{statusLabels[visualState]}</span></div>

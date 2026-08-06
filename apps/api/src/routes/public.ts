@@ -6,7 +6,7 @@ import { cancelTournamentRegistration, registerForTournament } from '../services
 import { notifyUser, registrationNotification } from '../bot.js';
 import { getBotUsername } from '../bot.js';
 import { z } from 'zod';
-import { answerDailyHand, ensureReferralCode, evaluateAchievements, getDailyContent, getPlayerLoyaltyStats } from '../services/loyalty.js';
+import { achievementProgressValue, answerDailyHand, ensureReferralCode, evaluateAchievements, getDailyContent, getPlayerLoyaltyStats } from '../services/loyalty.js';
 import { env } from '../config.js';
 import { AppError } from '../errors.js';
 import { writeAudit } from '../services/audit.js';
@@ -252,12 +252,14 @@ publicRouter.get('/profile', async (req, res) => {
     }
   });
   if (!user) return res.status(404).json({ message: 'Пользователь не найден' });
-  const [rank, loyaltyStats, gamesPlayed, bestResult] = await Promise.all([
+  const [rank, loyaltyStats, gamesPlayed, bestResult, achievementDefinitions] = await Promise.all([
     prisma.user.count({ where: { points: { gt: user.points } } }),
     getPlayerLoyaltyStats(user.id),
     prisma.tournamentResult.count({ where: { userId: user.id } }),
-    prisma.tournamentResult.aggregate({ where: { userId: user.id }, _min: { place: true } })
+    prisma.tournamentResult.aggregate({ where: { userId: user.id }, _min: { place: true } }),
+    prisma.achievement.findMany({ where: { isActive: true }, orderBy: [{ sortOrder: 'asc' }, { title: 'asc' }] })
   ]);
+  const unlockedAchievements = new Map(user.achievements.map((entry) => [entry.achievementId, entry]));
   return res.json({
     ...user,
     telegramId: user.telegramId?.toString() ?? null,
@@ -265,6 +267,25 @@ publicRouter.get('/profile', async (req, res) => {
     hasPhoneNumber: Boolean(user.phoneNumber),
     phoneNumberMasked: user.phoneNumber ? `${user.phoneNumber.slice(0, 4)}••••${user.phoneNumber.slice(-2)}` : null,
     rank: rank + 1,
+    achievementCatalog: achievementDefinitions.map((achievement) => {
+      const unlocked = unlockedAchievements.get(achievement.id);
+      const progress = achievementProgressValue(achievement.rule, loyaltyStats);
+      return {
+        id: achievement.id,
+        key: achievement.key,
+        title: achievement.title,
+        description: achievement.description,
+        icon: achievement.icon,
+        rule: achievement.rule,
+        threshold: achievement.threshold,
+        xpReward: achievement.xpReward,
+        progress: Math.min(progress, achievement.threshold),
+        isUnlocked: Boolean(unlocked),
+        isSecret: achievement.key.startsWith('secret_'),
+        unlockedAt: unlocked?.unlockedAt ?? null,
+        xpAwarded: unlocked?.xpAwarded ?? null
+      };
+    }),
     stats: {
       gamesPlayed,
       wins: loyaltyStats.wins,

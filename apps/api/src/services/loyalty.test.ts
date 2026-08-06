@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { calculateVisitStreak, clubDayKey, dailyIndex, nextClubDayStart } from './loyalty.js';
+import { AchievementRule } from '@prisma/client';
+import { achievementProgressValue, calculateVisitStreak, clubDayKey, dailyIndex, nextClubDayStart } from './loyalty.js';
 
 describe('loyalty rules', () => {
   it('creates a stable club day in the configured timezone', () => {
@@ -27,5 +28,16 @@ describe('loyalty rules', () => {
   it('does not double count two check-ins on the same day', () => {
     const dates = [new Date('2026-01-01T10:00:00.000Z'), new Date('2026-01-01T20:00:00.000Z'), new Date('2026-01-08T12:00:00.000Z')];
     expect(calculateVisitStreak(dates, 21)).toEqual({ current: 2, best: 2 });
+  });
+
+  it('maps every achievement rule to the visible player progress', () => {
+    const stats = { visits: 8, wins: 2, finalTables: 4, referrals: 3, dailyCorrect: 6, streak: { current: 2, best: 5 } };
+    expect(achievementProgressValue(AchievementRule.FIRST_VISIT, stats)).toBe(8);
+    expect(achievementProgressValue(AchievementRule.FIRST_WIN, stats)).toBe(2);
+    expect(achievementProgressValue(AchievementRule.VISITS, stats)).toBe(8);
+    expect(achievementProgressValue(AchievementRule.FINAL_TABLES, stats)).toBe(4);
+    expect(achievementProgressValue(AchievementRule.REFERRALS, stats)).toBe(3);
+    expect(achievementProgressValue(AchievementRule.STREAK, stats)).toBe(5);
+    expect(achievementProgressValue(AchievementRule.DAILY_HAND_CORRECT, stats)).toBe(6);
   });
 });

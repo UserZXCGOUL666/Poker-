@@ -194,7 +194,16 @@ export async function getPlayerLoyaltyStats(userId: string) {
   return prisma.$transaction((tx) => loyaltyStats(tx, userId, settings.streakResetDays));
 }
 
-function achievementValue(rule: AchievementRule, stats: Awaited<ReturnType<typeof loyaltyStats>>) {
+export type AchievementProgressStats = {
+  visits: number;
+  wins: number;
+  finalTables: number;
+  referrals: number;
+  dailyCorrect: number;
+  streak: { current: number; best: number };
+};
+
+export function achievementProgressValue(rule: AchievementRule, stats: AchievementProgressStats) {
   const values: Record<AchievementRule, number> = {
     FIRST_VISIT: stats.visits,
     FIRST_WIN: stats.wins,
@@ -218,7 +227,7 @@ export async function evaluateAchievements(userId: string) {
     const known = new Set(unlocked.map((item) => item.achievementId));
     const awarded = [];
     for (const achievement of definitions) {
-      if (known.has(achievement.id) || achievementValue(achievement.rule, stats) < achievement.threshold) continue;
+      if (known.has(achievement.id) || achievementProgressValue(achievement.rule, stats) < achievement.threshold) continue;
       const unlockedAchievement = await tx.userAchievement.create({ data: { userId, achievementId: achievement.id, xpAwarded: achievement.xpReward } });
       if (achievement.xpReward > 0) await applyClubXpInTransaction(tx, {
         userId,
