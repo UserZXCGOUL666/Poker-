@@ -25,7 +25,7 @@ function countdown(target: string, now: number) {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
-export function DailyEngagement({ between }: { between: ReactNode }) {
+export function DailyEngagement({ before }: { before: ReactNode }) {
   const [data, setData] = useState<DailyContent | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,9 +80,9 @@ export function DailyEngagement({ between }: { between: ReactNode }) {
     });
   }
 
-  if (!data || (!data.tip && !data.hand)) return <>{between}</>;
+  if (!data || (!data.tip && !data.hand)) return <>{before}</>;
   const attempt = data.hand?.attempt;
-  return <section className="daily-engagement">
+  return <>{before}<section className="daily-engagement">
     {data.hand && <article className="daily-hand-card card">
       <header><span><Brain /></span><div><small>ЗАДАЧКА ДНЯ · {data.hand.difficulty}</small><h3>{data.hand.title}</h3></div><em>+{data.hand.rewardXp} XP</em></header>
       <p>{data.hand.scenario}</p>
@@ -110,7 +110,6 @@ export function DailyEngagement({ between }: { between: ReactNode }) {
       </>}
       {error && <div className="form-error">{error}</div>}
     </article>}
-    {between}
     {data.tip && <article className="daily-tip-card card"><span><Lightbulb /></span><div><small>{data.tip.category} · СОВЕТ ДНЯ</small><h3>{data.tip.title}</h3><p>{data.tip.body}</p></div></article>}
-  </section>;
+  </section></>;
 }

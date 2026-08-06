@@ -1,6 +1,6 @@
 import { CalendarDays, Check, Clock3, ListOrdered, MapPin, UserCheck, Users, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { ErrorState, Loading } from '../components/Loading';
 import { api, post } from '../lib/api';
 import { tournamentDate } from '../lib/format';
@@ -9,6 +9,8 @@ import type { Tournament, TournamentStatus } from '../types';
 const labels: Record<TournamentStatus, string> = { UPCOMING: 'Скоро', ACTIVE: 'Идёт сейчас', FINISHED: 'Завершён', CANCELLED: 'Отменён' };
 
 export function GamesPage() {
+  const [searchParams] = useSearchParams();
+  const focusedTournamentId = searchParams.get('tournament');
   const [items, setItems] = useState<Tournament[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -20,6 +22,16 @@ export function GamesPage() {
     catch (cause) { setLoadError(cause instanceof Error ? cause.message : 'Не удалось загрузить турниры'); }
   }, []);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (!items || !focusedTournamentId) return;
+    const focused = items.find((item) => item.id === focusedTournamentId);
+    if (!focused) return;
+    setFilter(focused.status === 'FINISHED' ? 'finished' : 'upcoming');
+    const timer = window.setTimeout(() => {
+      document.getElementById(`tournament-${focusedTournamentId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+    return () => window.clearTimeout(timer);
+  }, [focusedTournamentId, items]);
   async function register(game: Tournament) {
     setSavingId(game.id); setActionError(null); setNotice(null);
     try {
@@ -48,7 +60,7 @@ export function GamesPage() {
         const date = tournamentDate(game.startsAt);
         const registrationAvailable = (game.status === 'UPCOMING' || game.status === 'ACTIVE') && !game.registrationClosed && (!game.registrationDeadline || new Date(game.registrationDeadline) > new Date());
         const canCancel = game.status === 'UPCOMING' && (game.registration?.status === 'REGISTERED' || game.registration?.status === 'WAITLISTED');
-        return <article className="game-card card" key={game.id}>
+        return <article id={`tournament-${game.id}`} className={`game-card card ${focusedTournamentId === game.id ? 'game-card-focused' : ''}`} key={game.id}>
           <div className="game-card-head"><div className="date-tile"><strong>{date.day}</strong><span>{date.month}</span></div><span className={`status status-${game.status.toLowerCase()}`}>{game.status === 'FINISHED' && <Check size={13} />}{labels[game.status]}</span></div>
           <h2>{game.title}</h2><p>{game.description}</p>
           <div className="game-meta"><span><Clock3 size={16} />{date.time}</span><span><Users size={16} />{game.participantCount || game._count?.results || 0}/{game.capacity}</span>{game.location && <span><MapPin size={16} />{game.location}</span>}</div>

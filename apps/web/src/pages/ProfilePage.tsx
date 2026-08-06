@@ -3,7 +3,7 @@ import {
   Medal, Phone, Save, Send, ShieldCheck, Spade, Trash2, Trophy, UserPlus, Users, X, Zap
 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Avatar } from '../components/Avatar';
 import { ErrorState, Loading } from '../components/Loading';
 import { useAuth } from '../contexts/AuthContext';
@@ -12,6 +12,11 @@ import { points, tournamentDate } from '../lib/format';
 import type { ClubXpTransaction, PointTransaction, ReferralInfo, Tournament, User } from '../types';
 
 type ProfileTab = 'overview' | 'history' | 'rewards' | 'friends';
+const profileTabs: ProfileTab[] = ['overview', 'history', 'rewards', 'friends'];
+
+function profileTabFromQuery(value: string | null): ProfileTab {
+  return profileTabs.includes(value as ProfileTab) ? value as ProfileTab : 'overview';
+}
 type Profile = User & {
   rank: number;
   createdAt: string;
@@ -77,8 +82,9 @@ async function prepareProfilePhoto(file: File) {
 
 export function ProfilePage() {
   const { refresh } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [tab, setTab] = useState<ProfileTab>('overview');
+  const [tab, setTab] = useState<ProfileTab>(() => profileTabFromQuery(searchParams.get('tab')));
   const [referral, setReferral] = useState<ReferralInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [phoneMessage, setPhoneMessage] = useState<string | null>(null);
@@ -92,6 +98,7 @@ export function ProfilePage() {
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
   const photoInput = useRef<HTMLInputElement>(null);
   useEffect(() => { api<Profile>('/profile').then((value) => setProfile(normalizeProfile(value))).catch((e: Error) => setError(e.message)); }, []);
+  useEffect(() => { setTab(profileTabFromQuery(searchParams.get('tab'))); }, [searchParams]);
   useEffect(() => {
     if (tab === 'friends' && !referral) api<ReferralInfo>('/loyalty/referral').then(setReferral).catch((e: Error) => setShareMessage(e.message));
   }, [tab, referral]);
@@ -147,6 +154,11 @@ export function ProfilePage() {
       try { await navigator.clipboard.writeText(text); setShareMessage('Приглашение скопировано'); }
       catch { setShareMessage('Не удалось открыть отправку. Скопируйте ссылку вручную.'); }
     }
+  }
+
+  function selectTab(nextTab: ProfileTab) {
+    setTab(nextTab);
+    setSearchParams(nextTab === 'overview' ? {} : { tab: nextTab }, { replace: true });
   }
 
   function openEditor() {
@@ -218,10 +230,10 @@ export function ProfilePage() {
       <div><Coins size={20} /><strong>{points(profile.clubXp)}</strong><span>Club XP</span></div>
     </div>
     <nav className="profile-tabs">
-      <button className={tab === 'overview' ? 'active' : ''} onClick={() => setTab('overview')}><Medal />Обзор</button>
-      <button className={tab === 'history' ? 'active' : ''} onClick={() => setTab('history')}><History />История</button>
-      <button className={tab === 'rewards' ? 'active' : ''} onClick={() => setTab('rewards')}><Gift />Награды</button>
-      <button className={tab === 'friends' ? 'active' : ''} onClick={() => setTab('friends')}><Users />Друзья</button>
+      <button className={tab === 'overview' ? 'active' : ''} onClick={() => selectTab('overview')}><Medal />Обзор</button>
+      <button className={tab === 'history' ? 'active' : ''} onClick={() => selectTab('history')}><History />История</button>
+      <button className={tab === 'rewards' ? 'active' : ''} onClick={() => selectTab('rewards')}><Gift />Награды</button>
+      <button className={tab === 'friends' ? 'active' : ''} onClick={() => selectTab('friends')}><Users />Друзья</button>
     </nav>
 
     {tab === 'overview' && <>

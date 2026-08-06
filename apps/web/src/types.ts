@@ -99,11 +99,12 @@ export type PointTransaction = {
 export type HomeData = {
   season: Season | null;
   week: number;
-  user: Player & { rank: number; totalUsers: number };
+  user: Player & Pick<User, 'clubXp'> & { rank: number; totalUsers: number };
   nextTournament: Tournament | null;
   weeklyPoints: number;
   finalTables: number;
   gamesPlayed: number;
+  wins: number;
   leaders: Player[];
   branding?: { hasRatingBanner: boolean; accentColor?: string; updatedAt: string | null };
   nextSeating: { seatNumber: number; table: { number: number }; tournament: { id: string; title: string; startsAt: string } } | null;

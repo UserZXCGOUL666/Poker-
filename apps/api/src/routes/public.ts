@@ -49,10 +49,10 @@ publicRouter.use('/tournaments', timerPublicRouter);
 const userSelect = { id: true, firstName: true, lastName: true, username: true, nickname: true, photoUrl: true, points: true } as const;
 
 publicRouter.get('/home', async (req, res) => {
-  const user = await prisma.user.findUnique({ where: { id: req.auth!.userId }, select: userSelect });
+  const user = await prisma.user.findUnique({ where: { id: req.auth!.userId }, select: { ...userSelect, clubXp: true } });
   if (!user) return res.status(404).json({ message: 'Пользователь не найден' });
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const [season, nextTournament, leaders, usersAhead, totalUsers, weeklyResult, finalTables, gamesPlayed, branding, nextSeating] = await Promise.all([
+  const [season, nextTournament, leaders, usersAhead, totalUsers, weeklyResult, finalTables, gamesPlayed, wins, branding, nextSeating] = await Promise.all([
     prisma.season.findFirst({ where: { isActive: true }, orderBy: { startsAt: 'desc' } }),
     prisma.tournament.findFirst({
       where: { status: 'UPCOMING', startsAt: { gte: new Date() } },
@@ -68,12 +68,13 @@ publicRouter.get('/home', async (req, res) => {
         }
       }
     }),
-    prisma.user.findMany({ orderBy: [{ points: 'desc' }, { createdAt: 'asc' }], take: 3, select: userSelect }),
+    prisma.user.findMany({ orderBy: [{ points: 'desc' }, { createdAt: 'asc' }], take: 5, select: userSelect }),
     prisma.user.count({ where: { points: { gt: user.points } } }),
     prisma.user.count(),
     prisma.pointTransaction.aggregate({ where: { userId: user.id, season: { isActive: true }, createdAt: { gte: weekAgo } }, _sum: { amount: true } }),
     prisma.tournamentResult.count({ where: { userId: user.id, isFinalTable: true, tournament: { season: { isActive: true } } } }),
     prisma.tournamentResult.count({ where: { userId: user.id, tournament: { season: { isActive: true } } } }),
+    prisma.tournamentResult.count({ where: { userId: user.id, place: 1, tournament: { season: { isActive: true } } } }),
     prisma.clubSettings.findUnique({ where: { id: 'main' }, select: { ratingBannerImageData: true, accentColor: true, updatedAt: true } }),
     prisma.tournamentSeat.findFirst({
       where: { userId: user.id, tournament: { seatingPublishedAt: { not: null }, status: { in: ['UPCOMING', 'ACTIVE'] }, startsAt: { gte: new Date(Date.now() - 12 * 60 * 60 * 1000) } } },
@@ -95,6 +96,7 @@ publicRouter.get('/home', async (req, res) => {
     weeklyPoints: weeklyResult._sum.amount ?? 0,
     finalTables,
     gamesPlayed,
+    wins,
     leaders,
     branding: { hasRatingBanner: Boolean(branding?.ratingBannerImageData), accentColor: branding?.accentColor ?? '#3B8CFF', updatedAt: branding?.updatedAt ?? null },
     nextSeating

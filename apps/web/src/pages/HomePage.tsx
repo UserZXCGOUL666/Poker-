@@ -1,12 +1,21 @@
-import { Armchair, Check, ChevronRight, ListOrdered, UserCheck, X } from 'lucide-react';
+import { Armchair, BarChart3, Check, ChevronRight, Crown, ListOrdered, Trophy, UserCheck, X } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Avatar } from '../components/Avatar';
 import { DailyEngagement } from '../components/DailyEngagement';
 import { ErrorState, Loading } from '../components/Loading';
 import { api, apiAssetUrl, post } from '../lib/api';
+import { clubRankProgress } from '../lib/clubRank';
 import { points, tournamentDate } from '../lib/format';
 import type { HomeData } from '../types';
+
+function playerName(player: HomeData['user']) {
+  return player.nickname || player.username || `${player.firstName} ${player.lastName ?? ''}`.trim();
+}
+
+function leaderName(player: HomeData['leaders'][number]) {
+  return player.nickname || player.username || `${player.firstName} ${player.lastName ?? ''}`.trim();
+}
 
 export function HomePage() {
   const [data, setData] = useState<HomeData | null>(null);
@@ -24,9 +33,9 @@ export function HomePage() {
   useEffect(() => { void load(); }, [load]);
   if (error) return <ErrorState message={error} />;
   if (!data) return <Loading />;
-  const target = Math.ceil((data.user.points + 1) / 500) * 500;
-  const progress = Math.min(100, Math.max(8, data.user.points / target * 100));
+
   const next = data.nextTournament ? tournamentDate(data.nextTournament.startsAt) : null;
+  const xp = clubRankProgress(data.user.clubXp);
   const activeRegistration = data.nextTournament?.registration && data.nextTournament.registration.status !== 'CANCELLED'
     ? data.nextTournament.registration
     : null;
@@ -52,66 +61,82 @@ export function HomePage() {
     }
   }
 
-  const resultsBlock = <section className="home-results-block">
-    <div className="section-title"><h2>Ваши результаты</h2></div>
-    <div className="stats-grid">
-      <div className="stat-card card"><span>Очки за неделю</span><strong className={data.weeklyPoints >= 0 ? 'blue' : 'negative'}>{data.weeklyPoints > 0 ? '+' : ''}{points(data.weeklyPoints)}</strong></div>
-      <div className="stat-card card"><span>В финале</span><strong>{data.finalTables}/{data.gamesPlayed}</strong></div>
+  const leadersBlock = <section className="home-leaders card">
+    <header>
+      <div><Trophy /><h2>Лидеры сезона</h2></div>
+      <Link to="/rating">Смотреть рейтинг <ChevronRight /></Link>
+    </header>
+    <div className="home-leader-list">
+      {data.leaders.map((leader, index) => (
+        <Link className={`home-leader-row leader-place-${index + 1}`} to="/rating" key={leader.id} aria-label={`${leaderName(leader)}, место ${index + 1}`}>
+          <span className="home-leader-place">{index === 0 ? <Crown /> : index + 1}</span>
+          <Avatar firstName={leader.firstName} lastName={leader.lastName} photoUrl={leader.photoUrl} size="sm" />
+          <strong>{leaderName(leader)}</strong>
+          <small>#{index + 1}</small>
+          <b>{points(leader.points)} PTS</b>
+        </Link>
+      ))}
     </div>
+  </section>;
+
+  const resultsBlock = <section className="home-results-block card">
+    <header><div><BarChart3 /><h2>Ваши результаты</h2></div></header>
+    <div className="home-result-metrics">
+      <div><span>Турниров сыграно</span><strong>{data.gamesPlayed}</strong></div>
+      <div><span>Финальных столов</span><strong>{data.finalTables}</strong></div>
+      <div><span>Побед</span><strong>{data.wins}</strong></div>
+    </div>
+    <Link className="home-full-stats" to="/profile?tab=overview">Открыть полную статистику <ChevronRight /></Link>
   </section>;
 
   return <div className="page home-page">
     <p className="season-line">{data.season?.name ?? 'Новый сезон'} · Неделя {data.week}</p>
 
-    <section className={`rating-hero ${data.branding?.hasRatingBanner ? 'rating-hero-custom' : ''}`} style={data.branding?.hasRatingBanner ? { backgroundImage: `linear-gradient(90deg, rgba(var(--accent-rgb), .94), rgba(var(--accent-rgb), .58)), url(${apiAssetUrl(`/branding/rating-banner?v=${encodeURIComponent(data.branding.updatedAt ?? '')}`)})` } : undefined}>
-      <div className="rating-watermark">♠</div>
-      <div className="rating-top">
-        <div><span>Ваш рейтинг</span><div className="rank-number">#{data.user.rank}<small>из {data.user.totalUsers}</small></div></div>
-        <div className="league-badge">Серебро II</div>
+    <section
+      className={`home-overview-card ${data.branding?.hasRatingBanner ? 'home-overview-custom' : ''}`}
+      style={data.branding?.hasRatingBanner ? { backgroundImage: `linear-gradient(100deg, rgba(30, 12, 25, .96), rgba(52, 20, 37, .78)), url(${apiAssetUrl(`/branding/rating-banner?v=${encodeURIComponent(data.branding.updatedAt ?? '')}`)})` } : undefined}
+    >
+      <Link className="home-player-summary" to="/rating" aria-label="Открыть рейтинг игроков">
+        <small>ИГРОК</small>
+        <h1>{playerName(data.user)}</h1>
+        <span>Ваша позиция</span>
+        <strong>#{data.user.rank}</strong>
+        <em>из {data.user.totalUsers}</em>
+      </Link>
+      <div className="home-tournament-summary">
+        <small>БЛИЖАЙШИЙ ТУРНИР</small>
+        {data.nextTournament && next ? <>
+          <Link className="home-tournament-link" to={`/games?tournament=${data.nextTournament.id}`}>
+            <div><h2>{data.nextTournament.title}</h2><p>{next.day} {next.month} · {next.time}</p><span>{data.nextTournament.participantCount}/{data.nextTournament.capacity} участников</span></div>
+            <ChevronRight />
+          </Link>
+          {data.nextSeating?.tournament.id === data.nextTournament.id && <Link className="home-seat-inline" to={`/games?tournament=${data.nextTournament.id}`}><Armchair />Стол №{data.nextSeating.table.number} · место №{data.nextSeating.seatNumber}</Link>}
+          <button
+            className={`home-registration-button ${activeRegistration ? 'registered' : ''}`}
+            disabled={savingRegistration || Boolean(activeRegistration) || !registrationAvailable}
+            onClick={() => void registerForNextTournament()}
+          >
+            {activeRegistration?.status === 'WAITLISTED'
+              ? <><ListOrdered />Вы в листе ожидания</>
+              : activeRegistration
+                ? <><Check />Вы записаны</>
+                : !registrationAvailable
+                  ? <><X />Регистрация закрыта</>
+                  : <><UserCheck />{savingRegistration ? 'Записываем…' : data.nextTournament.participantCount >= data.nextTournament.capacity ? 'Встать в очередь' : 'Записаться'}</>}
+          </button>
+        </> : <Link className="home-tournament-empty" to="/games"><span>Турниры скоро появятся</span><ChevronRight /></Link>}
       </div>
-      <div className="rating-points"><strong>{points(data.user.points)} PTS</strong><span>{points(target)} PTS</span></div>
-      <div className="progress"><i style={{ width: `${progress}%` }} /></div>
     </section>
-
-    <div className="section-title"><h2>Ближайший турнир</h2><Link to="/games">Все турниры</Link></div>
-    {data.nextTournament && next ? (
-      <article className="next-game card">
-        <Link to="/games" className="next-game-main">
-          <div className="date-tile"><strong>{next.day}</strong><span>{next.month}</span></div>
-          <div className="game-copy"><h3>{data.nextTournament.title}</h3><p>{next.time} · {data.nextTournament.participantCount} участников</p></div>
-          <span className="circle-action"><ChevronRight size={23} /></span>
-        </Link>
-        <button
-          className={`home-registration-button ${activeRegistration ? 'registered' : ''}`}
-          disabled={savingRegistration || Boolean(activeRegistration) || !registrationAvailable}
-          onClick={() => void registerForNextTournament()}
-        >
-          {activeRegistration?.status === 'WAITLISTED'
-            ? <><ListOrdered />Вы в листе ожидания</>
-            : activeRegistration
-              ? <><Check />Вы участвуете</>
-              : !registrationAvailable
-                ? <><X />Регистрация закрыта</>
-                : <><UserCheck />{savingRegistration ? 'Записываем…' : data.nextTournament.participantCount >= data.nextTournament.capacity ? 'Встать в очередь' : 'Зарегистрироваться'}</>}
-        </button>
-      </article>
-    ) : <div className="empty-card card">Ближайшие игры скоро появятся</div>}
     {registrationMessage && <div className={`home-registration-message ${registrationMessage.kind}`}>{registrationMessage.kind === 'success' ? <Check /> : <X />}{registrationMessage.text}</div>}
-    {data.nextSeating && <section className="my-seat-card card"><span><Armchair /></span><div><small>ВАША РАССАДКА · {data.nextSeating.tournament.title}</small><strong>Стол №{data.nextSeating.table.number} <i>·</i> Место №{data.nextSeating.seatNumber}</strong></div><Link to="/games"><ChevronRight /></Link></section>}
+    {data.nextSeating && data.nextSeating.tournament.id !== data.nextTournament?.id && <section className="my-seat-card card"><span><Armchair /></span><div><small>ВАША РАССАДКА · {data.nextSeating.tournament.title}</small><strong>Стол №{data.nextSeating.table.number} <i>·</i> Место №{data.nextSeating.seatNumber}</strong></div><Link to={`/games?tournament=${data.nextSeating.tournament.id}`}><ChevronRight /></Link></section>}
 
-    <DailyEngagement between={resultsBlock} />
+    <Link className="home-xp-card card" to="/profile?tab=rewards" aria-label="Открыть ранги и прогресс Club XP">
+      <div className="home-xp-progress" aria-label={`Прогресс до следующего ранга: ${Math.round(xp.progress)}%`}><i style={{ width: `${xp.progress}%` }} /></div>
+      <div className="home-rank-column"><small>РАНГ</small><strong>{xp.rank.name}</strong></div>
+      <div className="home-xp-column"><small>CLUB XP</small><strong>{points(xp.xp)} XP</strong><span>{xp.nextRank ? `До ${xp.nextRank.name}: ${points(xp.xpToNext)} XP` : 'Максимальный ранг достигнут'}</span></div>
+      <ChevronRight className="home-xp-chevron" />
+    </Link>
 
-    <div className="section-title"><h2>Лидеры сезона</h2><Link to="/rating">Рейтинг</Link></div>
-    <div className="leader-list">
-      {data.leaders.map((leader, index) => (
-        <div className="leader-row" key={leader.id}>
-          <span className="place">{String(index + 1).padStart(2, '0')}</span>
-          <Avatar firstName={leader.firstName} lastName={leader.lastName} photoUrl={leader.photoUrl} size="sm" />
-          <strong>{leader.nickname || leader.username || `${leader.firstName} ${leader.lastName ?? ''}`}</strong>
-          <b>{points(leader.points)}</b>
-        </div>
-      ))}
-    </div>
-    <Link to="/rating" className="mobile-more">Полный рейтинг <ChevronRight size={17} /></Link>
+    <DailyEngagement before={<>{leadersBlock}{resultsBlock}</>} />
   </div>;
 }
