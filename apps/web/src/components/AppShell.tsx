@@ -2,6 +2,7 @@ import { BarChart3, CalendarDays, Gift, Home, ShieldCheck, UserRound } from 'luc
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Avatar } from './Avatar';
+import { TrainingLeadPopup } from './TrainingLeadPopup';
 
 const navItems = [
   { to: '/', label: 'Главная', icon: Home },
@@ -29,6 +30,7 @@ export function AppShell() {
         </div>
       </header>
       <main className="app-content"><Outlet /></main>
+      <TrainingLeadPopup />
       <nav className="bottom-nav">
         {navItems.map(({ to, label, icon: Icon }) => (
           <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) => isActive ? 'active' : ''}>

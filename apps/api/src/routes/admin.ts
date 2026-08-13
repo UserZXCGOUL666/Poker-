@@ -21,6 +21,7 @@ import { assignPlayerSeat, autoSeatTournament, closeTournamentTable, createTourn
 import { loyaltyAdminRouter } from './loyaltyAdmin.js';
 import { analyticsAdminRouter } from './analyticsAdmin.js';
 import { timerAdminRouter } from './timerAdmin.js';
+import { appendTrainingLeadToSheet, extractGoogleSpreadsheetId, googleSheetsConfigured } from '../services/googleSheets.js';
 
 export const adminRouter = Router();
 
@@ -112,6 +113,105 @@ adminRouter.get('/overview', async (_req, res) => {
     waitlistedPlayers ? { id: 'waitlisted-players', severity: 'info', title: 'Есть лист ожидания', text: `${waitlistedPlayers} игроков ожидают место в предстоящих турнирах.`, section: 'tournaments' } : null
   ].filter(Boolean);
   return res.json({ players, tournaments, activeSeason, activeBrowserSessions, nextTournament, focusTournament, recentTournaments, recentPointTransactions, alerts });
+});
+
+adminRouter.get('/training-leads/settings', async (_req, res) => {
+  const [settings, total, unsynced] = await Promise.all([
+    prisma.clubSettings.findUnique({ where: { id: 'main' }, select: { trainingSheetUrl: true, trainingLeadPopupEnabled: true, updatedAt: true } }),
+    prisma.trainingLead.count(),
+    prisma.trainingLead.count({ where: { sheetSyncedAt: null } })
+  ]);
+  return res.json({
+    trainingSheetUrl: settings?.trainingSheetUrl ?? '',
+    trainingLeadPopupEnabled: settings?.trainingLeadPopupEnabled ?? false,
+    googleSheetsConfigured: googleSheetsConfigured(),
+    googleServiceAccountEmail: env.GOOGLE_SERVICE_ACCOUNT_EMAIL ?? null,
+    totalLeads: total,
+    unsyncedLeads: unsynced,
+    updatedAt: settings?.updatedAt ?? null
+  });
+});
+
+const trainingLeadSettingsSchema = z.object({
+  trainingSheetUrl: z.string().trim().max(1000).optional().default(''),
+  trainingLeadPopupEnabled: z.boolean().default(false)
+}).superRefine((value, ctx) => {
+  if (value.trainingSheetUrl && !extractGoogleSpreadsheetId(value.trainingSheetUrl)) {
+    ctx.addIssue({ code: 'custom', path: ['trainingSheetUrl'], message: 'Вставьте ссылку на Google Sheets вида docs.google.com/spreadsheets/d/…' });
+  }
+  if (value.trainingLeadPopupEnabled && !value.trainingSheetUrl) {
+    ctx.addIssue({ code: 'custom', path: ['trainingSheetUrl'], message: 'Для включения формы укажите таблицу Google Sheets' });
+  }
+});
+
+adminRouter.put('/training-leads/settings', async (req, res, next) => {
+  try {
+    const input = trainingLeadSettingsSchema.parse(req.body);
+    const trainingSheetUrl = input.trainingSheetUrl || null;
+    const settings = await prisma.$transaction(async (tx) => {
+      const existing = await tx.clubSettings.findUnique({ where: { id: 'main' }, select: { trainingSheetUrl: true, trainingLeadPopupEnabled: true } });
+      const updated = await tx.clubSettings.upsert({
+        where: { id: 'main' },
+        update: { trainingSheetUrl, trainingLeadPopupEnabled: input.trainingLeadPopupEnabled },
+        create: { id: 'main', trainingSheetUrl, trainingLeadPopupEnabled: input.trainingLeadPopupEnabled }
+      });
+      await writeAudit(tx, {
+        actorId: req.auth!.userId,
+        action: 'TRAINING_LEAD_SETTINGS_UPDATED',
+        entityType: 'ClubSettings',
+        entityId: updated.id,
+        summary: input.trainingLeadPopupEnabled ? 'Включена запись на бесплатное обучение' : 'Обновлены настройки записи на обучение',
+        before: existing ?? null,
+        after: { trainingSheetUrl, trainingLeadPopupEnabled: input.trainingLeadPopupEnabled }
+      });
+      return updated;
+    });
+    return res.json({
+      trainingSheetUrl: settings.trainingSheetUrl ?? '',
+      trainingLeadPopupEnabled: settings.trainingLeadPopupEnabled,
+      googleSheetsConfigured: googleSheetsConfigured(),
+      googleServiceAccountEmail: env.GOOGLE_SERVICE_ACCOUNT_EMAIL ?? null,
+      updatedAt: settings.updatedAt
+    });
+  } catch (error) { return next(error); }
+});
+
+adminRouter.post('/training-leads/sync', async (_req, res, next) => {
+  try {
+    const settings = await prisma.clubSettings.findUnique({ where: { id: 'main' }, select: { trainingSheetUrl: true } });
+    if (!settings?.trainingSheetUrl) throw new AppError('Сначала укажите Google Sheets в настройках', 409, 'TRAINING_SHEET_NOT_SET');
+    if (!googleSheetsConfigured()) throw new AppError('Google Sheets service account не настроен на сервере', 409, 'GOOGLE_SHEETS_NOT_CONFIGURED');
+    const leads = await prisma.trainingLead.findMany({
+      where: { sheetSyncedAt: null },
+      orderBy: { createdAt: 'asc' },
+      take: 100,
+      include: { user: { select: { id: true, firstName: true, lastName: true, username: true, nickname: true } } }
+    });
+    let synced = 0;
+    let failed = 0;
+    for (const lead of leads) {
+      const userLabel = lead.user.username ? `@${lead.user.username}` : lead.user.nickname || [lead.user.firstName, lead.user.lastName].filter(Boolean).join(' ');
+      try {
+        await appendTrainingLeadToSheet({
+          sheetUrl: settings.trainingSheetUrl,
+          createdAt: lead.createdAt,
+          fullName: lead.fullName,
+          phoneNumber: lead.phoneNumber,
+          preferredContactAt: lead.preferredContactAt,
+          preferredVisitAt: lead.preferredVisitAt,
+          userLabel,
+          userId: lead.userId
+        });
+        await prisma.trainingLead.update({ where: { id: lead.id }, data: { sheetSyncedAt: new Date(), sheetSyncError: null } });
+        synced += 1;
+      } catch (error) {
+        const message = error instanceof Error ? error.message.slice(0, 1000) : 'Неизвестная ошибка Google Sheets';
+        await prisma.trainingLead.update({ where: { id: lead.id }, data: { sheetSyncError: message } });
+        failed += 1;
+      }
+    }
+    return res.json({ synced, failed, remaining: await prisma.trainingLead.count({ where: { sheetSyncedAt: null } }) });
+  } catch (error) { return next(error); }
 });
 
 adminRouter.get('/branding', async (_req, res) => {

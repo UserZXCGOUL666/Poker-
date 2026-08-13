@@ -18,11 +18,17 @@ const schema = z.object({
   CLOUDINARY_CLOUD_NAME: z.string().trim().min(1).optional(),
   CLOUDINARY_API_KEY: z.string().trim().min(1).optional(),
   CLOUDINARY_API_SECRET: z.string().trim().min(1).optional(),
+  GOOGLE_SERVICE_ACCOUNT_EMAIL: z.string().trim().email().optional(),
+  GOOGLE_PRIVATE_KEY: z.string().trim().min(40).optional(),
   ALLOW_DEV_AUTH: z.enum(['true', 'false']).default('false').transform((value) => value === 'true')
 }).superRefine((value, ctx) => {
   const cloudinaryValues = [value.CLOUDINARY_CLOUD_NAME, value.CLOUDINARY_API_KEY, value.CLOUDINARY_API_SECRET];
   if (cloudinaryValues.some(Boolean) && !cloudinaryValues.every(Boolean)) {
     ctx.addIssue({ code: 'custom', path: ['CLOUDINARY_CLOUD_NAME'], message: 'Для Cloudinary задайте cloud name, API key и API secret вместе' });
+  }
+  const googleValues = [value.GOOGLE_SERVICE_ACCOUNT_EMAIL, value.GOOGLE_PRIVATE_KEY];
+  if (googleValues.some(Boolean) && !googleValues.every(Boolean)) {
+    ctx.addIssue({ code: 'custom', path: ['GOOGLE_SERVICE_ACCOUNT_EMAIL'], message: 'Для Google Sheets задайте email service account и private key вместе' });
   }
   try {
     new Intl.DateTimeFormat('ru-RU', { timeZone: value.CLUB_TIMEZONE }).format();

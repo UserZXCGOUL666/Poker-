@@ -130,6 +130,7 @@ model User {
   tournamentActions     TournamentPlayerAction[] @relation("TournamentActionPlayer")
   tournamentActionTargets TournamentPlayerAction[] @relation("TournamentActionTarget")
   tournamentActionsCreated TournamentPlayerAction[] @relation("TournamentActionAdmin")
+  trainingLeads             TrainingLead[]
 
   @@index([points, createdAt])
   @@index([clubXp, createdAt])
@@ -446,10 +447,29 @@ model TournamentSeat {
 }
 
 model ClubSettings {
-  id                    String   @id @default("main")
-  ratingBannerImageData String?  @db.Text
-  accentColor           String   @default("#3B8CFF")
-  updatedAt             DateTime @updatedAt
+  id                       String   @id @default("main")
+  ratingBannerImageData    String?  @db.Text
+  accentColor              String   @default("#3B8CFF")
+  trainingSheetUrl         String?  @db.Text
+  trainingLeadPopupEnabled Boolean  @default(false)
+  updatedAt                DateTime @updatedAt
+}
+
+model TrainingLead {
+  id                 String   @id @default(cuid())
+  userId             String
+  fullName           String
+  phoneNumber        String
+  preferredContactAt String
+  preferredVisitAt   String
+  sheetSyncedAt      DateTime?
+  sheetSyncError     String?  @db.Text
+  createdAt          DateTime @default(now())
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([createdAt])
+  @@index([sheetSyncedAt, createdAt])
 }
 
 model LoyaltySettings {

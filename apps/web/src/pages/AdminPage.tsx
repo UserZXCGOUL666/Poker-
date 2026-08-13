@@ -108,6 +108,7 @@ type SeatingData = {
   seatedCount: number;
 };
 type BrandingSettings = { ratingBannerImageData: string | null; accentColor: string; updatedAt: string | null };
+type TrainingLeadSettings = { trainingSheetUrl: string; trainingLeadPopupEnabled: boolean; googleSheetsConfigured: boolean; googleServiceAccountEmail?: string | null; totalLeads?: number; unsyncedLeads?: number; updatedAt: string | null };
 
 const desktopSections = [
   { id: 'overview' as const, label: 'MAIN', icon: LayoutDashboard },
@@ -1044,12 +1045,64 @@ function SettingsTab({ seasons, tags, reasonPresets, onDone }: { seasons: Season
       <section className="settings-list-card"><div className="admin-section-title"><div><h2>Шаблоны причин</h2><p>Быстрые кнопки при начислении</p></div><button className="button secondary" onClick={() => { setError(null); setEditingPreset(null); setPresetOpen(true); }}><Plus size={15} />Добавить</button></div><div>{reasonPresets.map((preset) => <article className={!preset.isActive ? 'inactive' : ''} key={preset.id}><span><Coins /></span><div><strong>{preset.label}</strong><small>{preset.reason}{preset.defaultAmount ? ` · ${Math.abs(preset.defaultAmount)} PTS` : ''}</small></div><div className="settings-row-actions"><button title="Изменить" onClick={() => { setError(null); setEditingPreset(preset); setPresetOpen(true); }}><Edit3 /></button><button onClick={() => void togglePreset(preset)}>{preset.isActive ? 'Скрыть' : 'Включить'}</button></div></article>)}</div></section>
       <section className="settings-list-card"><div className="admin-section-title"><div><h2>Теги игроков</h2><p>Приватная сегментация клуба</p></div><button className="button secondary" onClick={() => { setError(null); setEditingTag(null); setTagOpen(true); }}><Plus size={15} />Добавить</button></div><div>{tags.map((tag) => <article key={tag.id}><i style={{ background: tag.color }} /><div><strong>{tag.name}</strong><small>Доступен в карточке и фильтрах</small></div><div className="settings-row-actions"><button title="Изменить" onClick={() => { setError(null); setEditingTag(tag); setTagOpen(true); }}><Edit3 /></button><button className="danger" title="Удалить" onClick={() => void deleteTag(tag)}><Trash2 /></button></div></article>)}</div></section>
     </div>
+    <TrainingLeadSettingsEditor onDone={onDone} />
     <BrandingEditor onDone={onDone} />
     <section className="owner-security-card"><span><ShieldCheck /></span><div><h3>Администраторы защищены через Render</h3><p>Главные Telegram ID задаются в <code>ADMIN_TELEGRAM_IDS</code>. Сервер проверяет whitelist при каждом запросе к админке и исправляет роль пользователя при входе.</p></div></section>
     {modalOpen && <Modal title={editing ? 'Редактировать сезон' : 'Новый сезон'} onClose={() => setModalOpen(false)}><form className="admin-form" onSubmit={saveSeason}><div className="form-row"><label>Название<input name="name" required minLength={2} defaultValue={editing?.name ?? ''} placeholder="Сезон 05" /></label><label>Номер<input type="number" name="number" required min="1" defaultValue={editing?.number ?? Math.max(0, ...seasons.map((season) => season.number)) + 1} /></label></div><div className="form-row"><label>Начало<input type="date" name="startsAt" required defaultValue={editing ? dateInput(editing.startsAt) : ''} /></label><label>Окончание<input type="date" name="endsAt" required defaultValue={editing ? dateInput(editing.endsAt) : ''} /></label></div><label className="checkbox"><input type="checkbox" name="isActive" defaultChecked={editing?.isActive ?? false} />Активный сезон</label>{!editing?.isActive && <div className="destructive-note"><CircleAlert size={16} /><span>Активация сбросит текущие балансы до 0. Журнал очков и прошлые сезоны сохранятся.</span></div>}{error && <div className="form-error">{error}</div>}<button className="button primary wide" disabled={saving}><Save size={17} />{saving ? 'Сохраняем…' : 'Сохранить сезон'}</button></form></Modal>}
     {tagOpen && <Modal title={editingTag ? 'Редактировать тег' : 'Новый тег'} onClose={() => { setTagOpen(false); setEditingTag(null); }}><form key={editingTag?.id ?? 'new'} className="admin-form" onSubmit={createTag}><label>Название<input name="name" minLength={2} maxLength={30} required defaultValue={editingTag?.name ?? ''} placeholder="VIP" /></label><label>Цвет<input name="color" type="color" defaultValue={editingTag?.color ?? '#3b8cff'} /></label>{error && <div className="form-error">{error}</div>}<button className="button primary wide" disabled={saving}><Tags size={16} />{editingTag ? 'Сохранить тег' : 'Создать тег'}</button></form></Modal>}
     {presetOpen && <Modal title={editingPreset ? 'Редактировать шаблон' : 'Новый шаблон причины'} onClose={() => { setPresetOpen(false); setEditingPreset(null); }}><form key={editingPreset?.id ?? 'new'} className="admin-form" onSubmit={createPreset}><div className="form-row"><label>Короткое название<input name="label" minLength={2} maxLength={30} required defaultValue={editingPreset?.label ?? ''} placeholder="Призовое место" /></label><label>Для операции<select name="kind" defaultValue={editingPreset?.kind ?? 'BOTH'}><option value="BOTH">Любой</option><option value="AWARD">Начисление</option><option value="DEDUCTION">Списание</option></select></label></div><label>Текст причины<input name="reason" minLength={3} maxLength={160} required defaultValue={editingPreset?.reason ?? ''} placeholder="Призовое место в турнире" /></label><label>Сумма по умолчанию (необязательно)<input name="defaultAmount" type="number" min="-100000" max="100000" defaultValue={editingPreset?.defaultAmount ?? ''} placeholder="100" /></label>{error && <div className="form-error">{error}</div>}<button className="button primary wide" disabled={saving}><Save size={16} />{editingPreset ? 'Сохранить шаблон' : 'Создать шаблон'}</button></form></Modal>}
   </div>;
+}
+
+function TrainingLeadSettingsEditor({ onDone }: { onDone: (message: string) => void }) {
+  const [settings, setSettings] = useState<TrainingLeadSettings | null>(null);
+  const [sheetUrl, setSheetUrl] = useState('');
+  const [enabled, setEnabled] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api<TrainingLeadSettings>('/admin/training-leads/settings')
+      .then((value) => { setSettings(value); setSheetUrl(value.trainingSheetUrl); setEnabled(value.trainingLeadPopupEnabled); })
+      .catch((cause: Error) => setError(cause.message));
+  }, []);
+
+  async function syncTrainingLeads() {
+    setSaving(true); setError(null);
+    try {
+      const result = await post<{ synced: number; failed: number; remaining: number }>('/admin/training-leads/sync');
+      setSettings((current) => current ? { ...current, unsyncedLeads: result.remaining } : current);
+      onDone(`Синхронизировано заявок: ${result.synced}${result.failed ? ` · ошибок: ${result.failed}` : ''}`);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось повторить синхронизацию'); }
+    finally { setSaving(false); }
+  }
+
+  async function saveTrainingLeadSettings(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true); setError(null);
+    try {
+      const result = await post<TrainingLeadSettings>('/admin/training-leads/settings', { trainingSheetUrl: sheetUrl.trim(), trainingLeadPopupEnabled: enabled }, 'PUT');
+      setSettings((current) => ({ ...current, ...result } as TrainingLeadSettings));
+      setSheetUrl(result.trainingSheetUrl); setEnabled(result.trainingLeadPopupEnabled);
+      onDone(result.trainingLeadPopupEnabled ? 'Форма бесплатного обучения включена' : 'Настройки формы обучения сохранены');
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Не удалось сохранить настройки формы'); }
+    finally { setSaving(false); }
+  }
+
+  return <section className="training-lead-admin-card">
+    <header><span><NotebookPen /></span><div><small>ЛИД-ФОРМА</small><h3>Бесплатное обучение по покеру</h3><p>Всплывающая форма справа в приложении. Заявки сохраняются на сервере и отправляются в Google Sheets.</p></div></header>
+    <form onSubmit={saveTrainingLeadSettings}>
+      <label className="training-sheet-url">Ссылка на Google Sheets<input type="url" value={sheetUrl} onChange={(event) => setSheetUrl(event.target.value)} placeholder="https://docs.google.com/spreadsheets/d/..." /></label>
+      <label className="training-lead-toggle"><input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /><span><strong>Показывать форму игрокам</strong><small>После отправки одному пользователю форма повторно не показывается.</small></span></label>
+      <div className={`training-sheet-status ${settings?.googleSheetsConfigured ? 'ok' : 'warning'} ${settings?.googleSheetsConfigured && settings?.unsyncedLeads ? 'has-retry' : ''}`}>
+        <span>{settings?.googleSheetsConfigured ? <CheckCircle2 /> : <CircleAlert />}</span>
+        <div><strong>{settings?.googleSheetsConfigured ? 'Google Sheets API подключён' : 'Нужны credentials Google'}</strong><small>{settings?.googleSheetsConfigured ? `Заявок: ${settings.totalLeads ?? 0}${settings.unsyncedLeads ? ` · ожидают синхронизации: ${settings.unsyncedLeads}` : ''}${settings.googleServiceAccountEmail ? ` · дайте редакторский доступ: ${settings.googleServiceAccountEmail}` : ''}` : 'Добавьте GOOGLE_SERVICE_ACCOUNT_EMAIL и GOOGLE_PRIVATE_KEY в Render. Даже без них заявки сохраняются в базе и не теряются.'}</small></div>
+        {Boolean(settings?.googleSheetsConfigured && settings?.unsyncedLeads) && <button className="button secondary" type="button" disabled={saving} onClick={() => void syncTrainingLeads()}><RefreshCw size={13} />Повторить отправку</button>}
+      </div>
+      {error && <div className="form-error">{error}</div>}
+      <button className="button primary" disabled={saving}><Save size={15} />{saving ? 'Сохраняем…' : 'Сохранить'}</button>
+    </form>
+  </section>;
 }
 
 function BrandingEditor({ onDone }: { onDone: (message: string) => void }) {

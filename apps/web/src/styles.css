@@ -1980,3 +1980,77 @@ a { color: inherit; text-decoration: none; }
   .tournament-main-handoff { grid-template-columns: auto minmax(0, 1fr); }
   .tournament-main-handoff .button { grid-column: 1 / -1; width: 100%; }
 }
+
+/* Free poker training lead */
+.training-lead-popup { position: fixed; z-index: 80; right: max(18px, env(safe-area-inset-right)); bottom: 92px; width: min(360px, calc(100vw - 28px)); padding: 17px; overflow: hidden; color: var(--text); border: 1px solid rgba(var(--accent-rgb), .38); border-radius: 18px; background: linear-gradient(145deg, rgba(var(--accent-rgb), .13), #091523 37%, #06101d); box-shadow: 0 24px 70px rgba(0, 0, 0, .48), 0 0 0 1px rgba(255,255,255,.025) inset; animation: trainingLeadIn .28s ease-out; }
+.training-lead-popup::before { content: ''; position: absolute; width: 150px; height: 150px; right: -62px; top: -72px; border-radius: 50%; background: rgba(var(--accent-rgb), .12); filter: blur(4px); pointer-events: none; }
+.training-lead-close { position: absolute; z-index: 2; top: 10px; right: 10px; width: 30px; height: 30px; display: grid; place-items: center; padding: 0; color: #8297af; border: 0; border-radius: 9px; background: rgba(8, 20, 34, .78); cursor: pointer; }
+.training-lead-close:hover { color: white; background: #15263c; }
+.training-lead-close svg { width: 15px; }
+.training-lead-header { display: grid; grid-template-columns: 44px 1fr; gap: 11px; align-items: start; padding-right: 24px; }
+.training-lead-header > span { width: 42px; height: 42px; display: grid; place-items: center; color: var(--blue); border-radius: 12px; background: rgba(var(--accent-rgb), .13); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), .16); }
+.training-lead-header > span svg { width: 21px; }
+.training-lead-header small { color: var(--blue); font-size: 7px; font-weight: 950; letter-spacing: .16em; }
+.training-lead-header h3 { margin: 3px 0 4px; font-size: 16px; letter-spacing: -.025em; }
+.training-lead-header p { margin: 0; color: #8ca0b8; font-size: 10px; line-height: 1.45; }
+.training-lead-form { display: grid; gap: 9px; margin-top: 15px; }
+.training-lead-form label { display: grid; gap: 5px; color: #8ea2ba; font-size: 8px; font-weight: 750; }
+.training-lead-form input { width: 100%; height: 39px; padding: 0 10px; color: white; outline: 0; border: 1px solid #253a55; border-radius: 9px; background: #07111f; font: inherit; font-size: 10px; }
+.training-lead-form input:focus { border-color: rgba(var(--accent-rgb), .75); box-shadow: 0 0 0 3px rgba(var(--accent-rgb), .09); }
+.training-phone-field { position: relative; }
+.training-phone-field > svg { position: absolute; left: 10px; top: 50%; width: 13px; color: #65809f; transform: translateY(-50%); pointer-events: none; }
+.training-phone-field input { padding-left: 31px; }
+.training-lead-submit { min-height: 42px; margin-top: 2px; }
+.training-lead-submit svg { width: 15px; }
+.training-lead-error { padding: 8px 9px; color: #ff9aa6; border: 1px solid rgba(240, 68, 88, .28); border-radius: 8px; background: rgba(240, 68, 88, .08); font-size: 8px; line-height: 1.4; }
+.training-lead-success { min-height: 220px; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 24px 10px 5px; text-align: center; }
+.training-lead-success > span { width: 48px; height: 48px; display: grid; place-items: center; margin-bottom: 12px; color: var(--green); border-radius: 50%; background: rgba(70, 217, 139, .11); }
+.training-lead-success > span svg { width: 24px; }
+.training-lead-success strong { font-size: 15px; }
+.training-lead-success p { max-width: 270px; margin: 7px 0 18px; color: #8ca0b8; font-size: 10px; line-height: 1.5; }
+@keyframes trainingLeadIn { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
+
+@media (max-width: 620px) {
+  .training-lead-popup { right: 12px; bottom: calc(82px + env(safe-area-inset-bottom)); width: calc(100vw - 24px); max-height: calc(100dvh - 118px); overflow-y: auto; padding: 15px; border-radius: 16px; }
+  .training-lead-header h3 { font-size: 15px; }
+  .training-lead-form { gap: 8px; }
+  .training-lead-form input { height: 42px; font-size: 11px; }
+}
+
+/* Training lead admin settings */
+.training-lead-admin-card { margin-top: 28px; padding: 16px; border: 1px solid rgba(var(--accent-rgb), .28); border-radius: 15px; background: linear-gradient(120deg, rgba(var(--accent-rgb), .07), #091422 38%); }
+.training-lead-admin-card > header { display: grid; grid-template-columns: 42px 1fr; gap: 12px; align-items: start; margin-bottom: 15px; }
+.training-lead-admin-card > header > span { width: 40px; height: 40px; display: grid; place-items: center; color: var(--blue); border-radius: 11px; background: rgba(var(--accent-rgb), .11); }
+.training-lead-admin-card > header svg { width: 18px; }
+.training-lead-admin-card header small { color: var(--blue); font-size: 7px; font-weight: 900; letter-spacing: .15em; }
+.training-lead-admin-card h3 { margin: 3px 0 4px; font-size: 13px; }
+.training-lead-admin-card header p { margin: 0; color: #8397b0; font-size: 9px; line-height: 1.45; }
+.training-lead-admin-card form { display: grid; grid-template-columns: minmax(280px, 1.35fr) minmax(250px, 1fr) auto; gap: 10px; align-items: end; }
+.training-sheet-url { display: grid; gap: 6px; color: #8da1b8; font-size: 8px; }
+.training-sheet-url input { height: 40px; padding: 0 10px; color: white; border: 1px solid #263d5a; border-radius: 9px; background: #07111f; font-size: 10px; }
+.training-lead-toggle { min-height: 40px; display: flex; align-items: center; gap: 9px; padding: 7px 9px; border: 1px solid #263d5a; border-radius: 9px; background: #07111f; cursor: pointer; }
+.training-lead-toggle input { accent-color: var(--blue); }
+.training-lead-toggle span { display: flex; flex-direction: column; gap: 2px; }
+.training-lead-toggle strong { font-size: 9px; }
+.training-lead-toggle small { color: #768ca5; font-size: 7px; }
+.training-sheet-status { grid-column: 1 / -1; display: grid; grid-template-columns: 30px 1fr; gap: 8px; align-items: center; padding: 9px 10px; border-radius: 9px; background: #0b192a; }
+.training-sheet-status > span { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; }
+.training-sheet-status.ok > span { color: var(--green); background: rgba(70, 217, 139, .1); }
+.training-sheet-status.warning > span { color: #f1b64a; background: rgba(241, 182, 74, .1); }
+.training-sheet-status svg { width: 14px; }
+.training-sheet-status div { display: flex; flex-direction: column; gap: 2px; }
+.training-sheet-status strong { font-size: 9px; }
+.training-sheet-status small { color: #7f94ad; font-size: 8px; line-height: 1.4; }
+.training-lead-admin-card form > .button { min-height: 40px; }
+
+@media (max-width: 900px) {
+  .training-lead-admin-card form { grid-template-columns: 1fr; }
+  .training-sheet-status { grid-column: 1; }
+  .training-lead-admin-card form > .button { width: 100%; }
+}
+.training-sheet-status.has-retry { grid-template-columns: 30px 1fr auto; }
+.training-sheet-status > button { min-height: 32px; white-space: nowrap; }
+@media (max-width: 700px) {
+  .training-sheet-status.has-retry { grid-template-columns: 30px 1fr; }
+  .training-sheet-status > button { grid-column: 1 / -1; width: 100%; }
+}

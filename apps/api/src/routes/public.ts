@@ -12,6 +12,7 @@ import { AppError } from '../errors.js';
 import { writeAudit } from '../services/audit.js';
 import { deleteProfilePhoto, uploadProfilePhoto } from '../services/profilePhotos.js';
 import { timerPublicRouter } from './timerPublic.js';
+import { appendTrainingLeadToSheet } from '../services/googleSheets.js';
 
 export const publicRouter = Router();
 
@@ -46,6 +47,65 @@ publicRouter.get('/users/:id/avatar', async (req, res) => {
 // Телевизионное табло не содержит персональных данных и доступно по прямой ссылке.
 publicRouter.use('/tournaments', timerPublicRouter);
 publicRouter.use(requireAuth);
+
+const trainingLeadSchema = z.object({
+  fullName: z.string().trim().min(3, 'Укажите ФИО').max(120),
+  phoneNumber: z.string().trim().min(6, 'Укажите номер телефона').max(40),
+  preferredContactAt: z.string().trim().min(2, 'Укажите удобное время для связи').max(160),
+  preferredVisitAt: z.string().trim().min(2, 'Укажите удобное время для обучения').max(160)
+});
+
+publicRouter.get('/training-lead/config', async (req, res) => {
+  const [settings, latestLead] = await Promise.all([
+    prisma.clubSettings.findUnique({ where: { id: 'main' }, select: { trainingLeadPopupEnabled: true, trainingSheetUrl: true } }),
+    prisma.trainingLead.findFirst({ where: { userId: req.auth!.userId }, orderBy: { createdAt: 'desc' }, select: { id: true, createdAt: true } })
+  ]);
+  return res.json({
+    enabled: Boolean(settings?.trainingLeadPopupEnabled),
+    configured: Boolean(settings?.trainingSheetUrl),
+    submitted: Boolean(latestLead),
+    submittedAt: latestLead?.createdAt ?? null
+  });
+});
+
+publicRouter.post('/training-leads', async (req, res, next) => {
+  try {
+    const input = trainingLeadSchema.parse(req.body);
+    const [settings, user] = await Promise.all([
+      prisma.clubSettings.findUnique({ where: { id: 'main' }, select: { trainingLeadPopupEnabled: true, trainingSheetUrl: true } }),
+      prisma.user.findUnique({ where: { id: req.auth!.userId }, select: { id: true, firstName: true, lastName: true, username: true, nickname: true } })
+    ]);
+    if (!settings?.trainingLeadPopupEnabled) throw new AppError('Запись на обучение сейчас закрыта', 409, 'TRAINING_LEADS_DISABLED');
+    if (!user) throw new AppError('Пользователь не найден', 404, 'USER_NOT_FOUND');
+
+    const lead = await prisma.trainingLead.create({
+      data: { userId: user.id, ...input }
+    });
+
+    if (settings.trainingSheetUrl) {
+      const userLabel = user.username ? `@${user.username}` : user.nickname || [user.firstName, user.lastName].filter(Boolean).join(' ');
+      try {
+        await appendTrainingLeadToSheet({
+          sheetUrl: settings.trainingSheetUrl,
+          createdAt: lead.createdAt,
+          fullName: lead.fullName,
+          phoneNumber: lead.phoneNumber,
+          preferredContactAt: lead.preferredContactAt,
+          preferredVisitAt: lead.preferredVisitAt,
+          userLabel,
+          userId: user.id
+        });
+        await prisma.trainingLead.update({ where: { id: lead.id }, data: { sheetSyncedAt: new Date(), sheetSyncError: null } });
+      } catch (error) {
+        const message = error instanceof Error ? error.message.slice(0, 1000) : 'Неизвестная ошибка Google Sheets';
+        await prisma.trainingLead.update({ where: { id: lead.id }, data: { sheetSyncError: message } });
+        console.error('Не удалось отправить заявку на обучение в Google Sheets', error);
+      }
+    }
+
+    return res.status(201).json({ id: lead.id, createdAt: lead.createdAt });
+  } catch (error) { return next(error); }
+});
 
 const userSelect = { id: true, firstName: true, lastName: true, username: true, nickname: true, photoUrl: true, points: true } as const;
 
