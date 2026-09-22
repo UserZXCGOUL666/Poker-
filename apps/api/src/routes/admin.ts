@@ -161,7 +161,7 @@ adminRouter.put('/training-leads/settings', async (req, res, next) => {
         entityType: 'ClubSettings',
         entityId: updated.id,
         summary: input.trainingLeadPopupEnabled ? 'Включена запись на бесплатное обучение' : 'Обновлены настройки записи на обучение',
-        before: existing ?? null,
+        before: existing ?? undefined,
         after: { trainingSheetUrl, trainingLeadPopupEnabled: input.trainingLeadPopupEnabled }
       });
       return updated;
